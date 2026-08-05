@@ -1,0 +1,11 @@
+name: kaggriculture
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pytest
+  - jupyterlab
+  - pip:
+      - kaggle-environments
+      - kaggle
