@@ -12,6 +12,26 @@ real state of `src/` and `agent/main.py`.
   agent submitted as `main.py` via `kaggle-environments`. No training data —
   "evaluation metric" here is performance across simulated episodes
   (win rate / final money) against baseline and prior-version opponents.
+- 2026-08-08 — `notebooks/01_explore_env.ipynb`: ran full 720-step
+  random-vs-random and random-vs-starter episodes locally
+  (`kaggle-environments` package, no Kaggle CLI needed). Findings:
+  - `obs` / `farms` / `market` / `private` / `town` keys and tile dict
+    shapes (`PLANT`, `WEED`, `COOP`/`PASTURE`, `LOCKED`, empty) all match
+    `README.md` / `AGENTS.md` exactly — no drift to correct for.
+  - `env.steps[-1][i]["reward"]` equals that player's final
+    `farms[i]["money"]` (cross-checked directly) — `evaluate.py` can read
+    `reward` off the last step instead of re-parsing the final `obs`.
+  - `"random"` vs `"random"`: **both agents finish at $0** (random market
+    orders bankrupt the farm — e.g. indiscriminate `BUY_LAND`/`BUY_SEED`
+    with no matching sells). `"random"` vs `"starter"`: starter wins
+    3503 vs 0. So `"starter"` is a real, non-trivial baseline to beat, and
+    `"random"` alone is a weak lower bound (any agent that just avoids
+    self-bankrupting should already clear it).
+  - `env.toJSON()` round-trips through `json.dump`/`json.load` cleanly;
+    replay saved to `replays/01_explore_random_vs_starter.json`.
+  - Confirms `config.py`'s re-export from the installed
+    `kaggle_environments` package (rather than hand-transcribing the
+    README tables) is valid and importable end to end.
 
 ## Next steps
 
@@ -20,10 +40,12 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
 
 ### Level 0 — Foundations + evaluation harness
 
-- [ ] Notebook `01_explore_env.ipynb`: play random/starter episodes, inspect
+- [x] Notebook `01_explore_env.ipynb`: play random/starter episodes, inspect
       a raw `obs` dict and a `replay.json`
-- [ ] Transcribe the Object Types / Price Function tables from `README.md`
+- [x] Transcribe the Object Types / Price Function tables from `README.md`
       into `src/kaggriculture_bot/config.py` as the single source of truth
+      (done via re-export from the installed package instead of hand
+      transcription — see 2026-08-08 log entry)
 - [ ] Build `state.py` / `actions.py` helpers (parse `obs`, build valid
       action dicts)
 - [ ] Build `evaluate.py`: run N episodes vs. `"random"` and `"starter"`
