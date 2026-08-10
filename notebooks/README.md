@@ -9,6 +9,8 @@ Planned:
 
 - `01_explore_env.ipynb` — play with `kaggle_environments.make("kaggriculture")`,
   inspect a raw `obs` dict, render a random-vs-random game
-- `02_baseline_wheat_loop.ipynb` — validate the AGENTS.md wheat-loop example
-  against `"random"` and `"starter"` opponents
+- `02_evaluate_harness.ipynb` — build/validate `score_episodes`,
+  `run_episodes`, `evaluate` (graduated to `src/kaggriculture_bot/evaluate.py`)
+- `03_baseline_wheat_loop.ipynb` — validate the AGENTS.md wheat-loop example
+  against `"random"` and `"starter"` opponents via `evaluate.py`
 - `NN_<idea>.ipynb` — one per new strategy under test

@@ -32,6 +32,15 @@ real state of `src/` and `agent/main.py`.
   - Confirms `config.py`'s re-export from the installed
     `kaggle_environments` package (rather than hand-transcribing the
     README tables) is valid and importable end to end.
+- 2026-08-10 — `notebooks/02_evaluate_harness.ipynb`: built and validated
+  `score_episodes`/`run_episodes`/`evaluate` (ties count as 0.5 wins).
+  Graduated to `src/kaggriculture_bot/evaluate.py` with unit tests on
+  `score_episodes`'s aggregation logic in `tests/test_evaluate.py`
+  (`pytest.ini` added so `tests/` can import the `src/` package). Ran the
+  wheat-loop agent prototyped in `notebooks/prueba.ipynb` through the new
+  harness (10 episodes each): **win_rate=1.0, avg_money=3891.2 vs
+  "random"**; **win_rate=1.0, avg_money=3920.0 vs "starter"** — clears
+  both baselines, so the harness itself is confirmed working end to end.
 
 ## Next steps
 
@@ -48,7 +57,7 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       transcription — see 2026-08-08 log entry)
 - [ ] Build `state.py` / `actions.py` helpers (parse `obs`, build valid
       action dicts)
-- [ ] Build `evaluate.py`: run N episodes vs. `"random"` and `"starter"`
+- [x] Build `evaluate.py`: run N episodes vs. `"random"` and `"starter"`
       built-in agents, report win rate + average final money — this is the
       gate every later change must clear (`structuring-ml-projects` step 6)
 - [ ] Join the competition on kaggle.com and download the kit data (blocked
