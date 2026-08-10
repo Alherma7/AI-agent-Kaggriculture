@@ -41,6 +41,23 @@ real state of `src/` and `agent/main.py`.
   harness (10 episodes each): **win_rate=1.0, avg_money=3891.2 vs
   "random"**; **win_rate=1.0, avg_money=3920.0 vs "starter"** — clears
   both baselines, so the harness itself is confirmed working end to end.
+- 2026-08-10 — `notebooks/03_baseline_wheat_loop.ipynb`: took the
+  wheat-loop agent from `00_inicio.ipynb` (renamed from `prueba.ipynb`)
+  through `evaluate.py` to resolve its two open TODOs:
+  - Fixed the `market` list being overwritten (assignment) instead of
+    accumulated (`.append`) between the `BUY_SEED` and `SELL` blocks —
+    validated against both baselines post-fix, still win_rate=1.0
+    (avg_money=3902.9 vs "random", 3868.0 vs "starter"; small deltas vs.
+    the pre-fix numbers are noise, not a behavior change, since buy/sell
+    rarely land on the same turn with this loop's logic).
+  - Tested selling the full `shed` in one `SELL` order per turn vs. the
+    original 1-unit-per-turn, both vs `"starter"`: **negative/inconclusive
+    result** — n=10 gave a 38-point avg_money gap (3906.0 vs 3868.0), but
+    re-running the *same* matchup at n=10 swung by >100 points purely
+    from episode randomness (weed-spawn chance). At n=20 the gap dropped
+    to 14 points (3894.0 vs 3880.0 sell-one) — within that noise band, so
+    not adopted; kept selling 1 unit/turn. `my_agent_v1` (sell-all) stays
+    in the notebook, unused, in case a much larger n reopens the question.
 
 ## Next steps
 
@@ -65,8 +82,11 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
 
 ### Level 1 — Baseline heuristic agent
 
-- [ ] Notebook `02_baseline_wheat_loop.ipynb`: validate the AGENTS.md
-      wheat-loop example against `evaluate.py`
+- [x] Notebook `03_baseline_wheat_loop.ipynb`: validate the AGENTS.md
+      wheat-loop example against `evaluate.py` (see 2026-08-10 log entry)
+- [ ] Graduate the validated wheat loop to
+      `src/kaggriculture_bot/strategies/baseline.py` (named function,
+      docstring, unit test) — see `structuring-ml-projects` graduation rule
 - [ ] Graduate to `agent/main.py`, submit v1, log the leaderboard result here
 
 ### Level 2 — Resource management
