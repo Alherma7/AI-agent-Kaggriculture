@@ -107,8 +107,8 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
 - [ ] Deduplicate `agent/main.py` vs. `strategies/baseline.py` (e.g. a
       build/packaging script that generates the flat submission file from
       the single source of truth) — deferred until actually needed again
-- [ ] Submit v1 to Kaggle, log the leaderboard result here (blocked on the
-      same CLI/SSL issue as the "join competition" step above)
+- [x] Submit v1 (`agent/main.py`, wheat-loop) to Kaggle — replay uploaded.
+      Leaderboard result not logged yet.
 
 ### Level 2 — Resource management
 
