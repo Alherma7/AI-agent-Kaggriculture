@@ -58,6 +58,19 @@ real state of `src/` and `agent/main.py`.
     to 14 points (3894.0 vs 3880.0 sell-one) — within that noise band, so
     not adopted; kept selling 1 unit/turn. `my_agent_v1` (sell-all) stays
     in the notebook, unused, in case a much larger n reopens the question.
+- 2026-08-11 — Graduated `wheat_loop_agent` from
+  `03_baseline_wheat_loop.ipynb` to
+  `src/kaggriculture_bot/strategies/baseline.py`, with a docstring citing
+  `AGENTS.md`'s "Example — Wheat Loop" and 10 unit tests in
+  `tests/test_baseline.py` covering the buy/plant/harvest/water/sell
+  branches (all passing). Resolved one open question in the process: the
+  notebook version checked WATER before HARVEST when both applied on the
+  same turn, diverging from the source example; confirmed with the source
+  and switched to HARVEST-before-WATER to match `AGENTS.md` exactly. The
+  sell-1-unit-per-turn behavior (vs. dumping the shed) was kept as-is,
+  since that was already the validated choice from the 2026-08-10 entry
+  above. `RESOURCES.md`'s `AGENTS.md` entry updated to point at the
+  graduated function and note both decisions.
 
 ## Next steps
 
@@ -84,10 +97,18 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
 
 - [x] Notebook `03_baseline_wheat_loop.ipynb`: validate the AGENTS.md
       wheat-loop example against `evaluate.py` (see 2026-08-10 log entry)
-- [ ] Graduate the validated wheat loop to
+- [x] Graduate the validated wheat loop to
       `src/kaggriculture_bot/strategies/baseline.py` (named function,
       docstring, unit test) — see `structuring-ml-projects` graduation rule
-- [ ] Graduate to `agent/main.py`, submit v1, log the leaderboard result here
+- [x] Graduate to `agent/main.py` — inlined `wheat_loop_agent`'s body
+      directly (2026-08-11) since Kaggle submissions must be a flat
+      `main.py`/tar.gz, not a `src/`-style package import; kept in sync by
+      hand with `src/kaggriculture_bot/strategies/baseline.py` for now
+- [ ] Deduplicate `agent/main.py` vs. `strategies/baseline.py` (e.g. a
+      build/packaging script that generates the flat submission file from
+      the single source of truth) — deferred until actually needed again
+- [ ] Submit v1 to Kaggle, log the leaderboard result here (blocked on the
+      same CLI/SSL issue as the "join competition" step above)
 
 ### Level 2 — Resource management
 

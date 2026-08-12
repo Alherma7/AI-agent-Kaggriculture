@@ -14,7 +14,13 @@ function's docstring.
 - **Kaggriculture AGENTS.md** (competition kit, root of this repo)
   Why: agent function signature, observation/action format, local test
   harness (`kaggle_environments`), CLI submission workflow. Source of the
-  first baseline (wheat-loop) example.
+  first baseline (wheat-loop) example, graduated to
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_agent`
+  (validated in `notebooks/03_baseline_wheat_loop.ipynb`, tested in
+  `tests/test_baseline.py`). The graduated version follows the source's
+  HARVEST-before-WATER priority exactly, but deviates on selling: 1
+  unit/turn instead of dumping the whole shed, per the sell-all-vs-sell-one
+  test logged in `PROGRESS.md` (2026-08-10).
 
 - **`notebooks/kaggriculture-getting-started.ipynb`** (bovard, official Kaggle
   starter kernel)
