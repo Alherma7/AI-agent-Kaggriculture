@@ -1,17 +1,15 @@
 """Submission entrypoint. Must define `agent(obs)` -> action dict.
 
+GENERATED FILE -- do not edit by hand. Edit the strategy in
+src/kaggriculture_bot/strategies/ and re-run the generator (this
+notebook / scripts/build_agent.py once it graduates).
+
 This is the "production" pipeline: only strategies that graduated from
 notebooks/ + evaluate.py (see RESOURCES.md, PROGRESS.md) get wired in here.
 Packaged and submitted via `kaggle competitions submit kaggriculture -f ...`
 (see AGENTS.md). No network/file I/O here at inference time — see
 docs/RULES_SUMMARY.md (No Ingress or Egress).
 """
-
-# Inlined copy of kaggriculture_bot.strategies.baseline.wheat_loop_agent.
-# Kaggle submissions must be flat (main.py [+ flat helper files], no
-# src/-style package) — see AGENTS.md "Submit Your Agent". Keep this in
-# sync by hand with src/kaggriculture_bot/strategies/baseline.py until a
-# build step generates it automatically (tracked in PROGRESS.md).
 
 
 def agent(obs):
