@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from build_agent import (
+    AGENT_DIR,
+    STRATEGY,
     _collect_internal_modules,
     _flat_name,
     _function_source,
@@ -195,3 +197,18 @@ def test_generate_files_raises_on_flat_name_collision(tmp_path):
 
     with pytest.raises(ValueError, match="collision"):
         generate_files("kaggriculture_bot.strategies.foo:foo_agent", src_root=tmp_path)
+
+
+def test_agent_dir_matches_generated_output():
+    """Guards against exactly the bug that motivated this script: someone
+    edits src/kaggriculture_bot/strategies/ (or agent/main.py directly)
+    and forgets to keep the other in sync. Run
+    `python scripts/build_agent.py` and commit the result if this fails.
+    """
+    expected = generate_files(STRATEGY)
+    actual = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in AGENT_DIR.iterdir()
+        if path.suffix == ".py"
+    }
+    assert actual == expected

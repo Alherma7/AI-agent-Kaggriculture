@@ -72,6 +72,24 @@ real state of `src/` and `agent/main.py`.
   above. `RESOURCES.md`'s `AGENTS.md` entry updated to point at the
   graduated function and note both decisions.
 
+- 2026-08-13 — `scripts/build_agent.py` (TDD, 18 unit tests in
+  `tests/test_build_agent.py`): statically parses (via `ast`, never
+  executes) `src/kaggriculture_bot/strategies/baseline.py`, extracts
+  `wheat_loop_agent`'s exact source, and rewrites it into `agent/main.py`
+  with an `agent(obs)` entrypoint — no internal dependencies to flatten
+  today, since `wheat_loop_agent` is self-contained. `agent/main.py` is
+  now a generated artifact (regenerate via `python scripts/build_agent.py`
+  after any strategy change); `test_agent_dir_matches_generated_output`
+  guards against drift. Found and fixed one bug while regenerating: the
+  notebook-prototyped `MAIN_HEADER` constant used `"""..."""` as its own
+  Python delimiter, so its *value* excluded the triple quotes — the
+  generated `agent/main.py` lost its enclosing docstring and became
+  invalid Python. Fixed by delimiting with `'''...'''` and including the
+  `"""` literally in the string. Also pinned `encoding="utf-8"` on all
+  `read_text`/`write_text` calls, per the risk flagged in the prior
+  session's notebook (Windows defaults to cp1252, which had already
+  silently mis-encoded the em-dash in this same header once).
+
 ## Next steps
 
 Roadmap in increasing agent complexity — each level only starts once the
@@ -104,9 +122,14 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       directly (2026-08-11) since Kaggle submissions must be a flat
       `main.py`/tar.gz, not a `src/`-style package import; kept in sync by
       hand with `src/kaggriculture_bot/strategies/baseline.py` for now
-- [ ] Deduplicate `agent/main.py` vs. `strategies/baseline.py` (e.g. a
-      build/packaging script that generates the flat submission file from
-      the single source of truth) — deferred until actually needed again
+- [x] Deduplicate `agent/main.py` vs. `strategies/baseline.py`: added
+      `scripts/build_agent.py`, which statically extracts the active
+      strategy function (and recursively copies/rewrites any internal
+      `kaggriculture_bot.*` imports as flat sibling files) into `agent/`.
+      `agent/main.py` is now a generated artifact, never hand-edited.
+      `tests/test_build_agent.py::test_agent_dir_matches_generated_output`
+      guards against drift. See
+      `docs/superpowers/specs/2026-08-12-build-agent-script-design.md`.
 - [x] Submit v1 (`agent/main.py`, wheat-loop) to Kaggle — replay uploaded.
       Leaderboard result not logged yet.
 
