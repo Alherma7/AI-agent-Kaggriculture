@@ -68,3 +68,17 @@ def _top_level_import_block(source):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             chunks.append("".join(lines[node.lineno - 1 : node.end_lineno]))
     return "".join(chunks)
+
+
+def _flat_name(module_name):
+    return module_name.rsplit(".", 1)[-1] + ".py"
+
+
+def _collect_internal_modules(module_name, src_root, collected):
+    if module_name in collected:
+        return
+    source = _module_to_path(module_name, src_root).read_text(encoding="utf-8")
+    collected[module_name] = _rewrite_internal_imports(source)
+    tree = ast.parse(source)
+    for node in _internal_import_nodes(tree):
+        _collect_internal_modules(node.module, src_root, collected)

@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from build_agent import (
+    _collect_internal_modules,
+    _flat_name,
     _function_source,
     _module_to_path,
     _rewrite_internal_imports,
@@ -95,3 +97,54 @@ def test_top_level_import_block_collects_only_top_level_imports_in_order():
 
 def test_top_level_import_block_empty_when_no_imports():
     assert _top_level_import_block("def agent(obs):\n    return obs\n") == ""
+
+
+def _write(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def test_flat_name_uses_last_component():
+    assert _flat_name("kaggriculture_bot.strategies.baseline") == "baseline.py"
+    assert _flat_name("kaggriculture_bot.config") == "config.py"
+
+
+def test_collect_internal_modules_single_dependency(tmp_path):
+    pkg = tmp_path / "kaggriculture_bot"
+    _write(pkg / "config.py", "CROPS = ['WHEAT']\n")
+
+    collected = {}
+    _collect_internal_modules("kaggriculture_bot.config", tmp_path, collected)
+
+    assert collected == {"kaggriculture_bot.config": "CROPS = ['WHEAT']\n"}
+
+
+def test_collect_internal_modules_recurses_transitively(tmp_path):
+    pkg = tmp_path / "kaggriculture_bot"
+    _write(pkg / "a.py", "from kaggriculture_bot.b import VALUE\n")
+    _write(pkg / "b.py", "VALUE = 1\n")
+
+    collected = {}
+    _collect_internal_modules("kaggriculture_bot.a", tmp_path, collected)
+
+    assert collected == {
+        "kaggriculture_bot.a": "from b import VALUE\n",
+        "kaggriculture_bot.b": "VALUE = 1\n",
+    }
+
+
+def test_collect_internal_modules_visits_each_module_once(tmp_path):
+    pkg = tmp_path / "kaggriculture_bot"
+    _write(pkg / "a.py", "from kaggriculture_bot.shared import X\n")
+    _write(pkg / "b.py", "from kaggriculture_bot.shared import Y\n")
+    _write(pkg / "shared.py", "X = 1\nY = 2\n")
+
+    collected = {}
+    _collect_internal_modules("kaggriculture_bot.a", tmp_path, collected)
+    _collect_internal_modules("kaggriculture_bot.b", tmp_path, collected)
+
+    assert set(collected) == {
+        "kaggriculture_bot.a",
+        "kaggriculture_bot.b",
+        "kaggriculture_bot.shared",
+    }
