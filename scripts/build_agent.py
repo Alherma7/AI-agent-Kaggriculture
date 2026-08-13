@@ -1,0 +1,34 @@
+import ast
+from pathlib import Path
+
+
+PACKAGE = "kaggriculture_bot"
+SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
+AGENT_DIR = Path(__file__).resolve().parent.parent / "agent" 
+STRATEGY = "kaggriculture_bot.strategies.baseline:wheat_loop_agent"
+MAIN_HEADER = """Submission entrypoint. Must define `agent(obs)` -> action dict.
+
+GENERATED FILE -- do not edit by hand. Edit the strategy in
+src/kaggriculture_bot/strategies/ and re-run the generator.
+
+This is the "production" pipeline: only strategies that graduated from
+notebooks/ + evaluate.py (see RESOURCES.md, PROGRESS.md) get wired in here.
+Packaged and submitted via `kaggle competitions submit kaggriculture -f ...`
+(see AGENTS.md). No network/file I/O here at inference time — see
+docs/RULES_SUMMARY.md (No Ingress or Egress).
+"""
+
+def _module_to_path(module_name, src_root):
+    if not module_name.startswith(PACKAGE + "."):
+        raise ValueError(f"not an internal module: {module_name!r}")
+    module_name_path = module_name.replace(".", "/") + ".py"
+    module_source = (src_root / module_name_path)
+    return module_source
+
+def _function_source(source, func_name):
+    tree = ast.parse(source)
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name == func_name:
+            lines = source.splitlines(keepends=True)
+            return "".join(lines[node.lineno - 1 : node.end_lineno])
+    raise ValueError(f"function {func_name!r} not found")
