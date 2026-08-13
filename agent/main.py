@@ -1,13 +1,12 @@
 """Submission entrypoint. Must define `agent(obs)` -> action dict.
 
 GENERATED FILE -- do not edit by hand. Edit the strategy in
-src/kaggriculture_bot/strategies/ and re-run the generator (this
-notebook / scripts/build_agent.py once it graduates).
+src/kaggriculture_bot/strategies/ and re-run the generator.
 
 This is the "production" pipeline: only strategies that graduated from
 notebooks/ + evaluate.py (see RESOURCES.md, PROGRESS.md) get wired in here.
 Packaged and submitted via `kaggle competitions submit kaggriculture -f ...`
-(see AGENTS.md). No network/file I/O here at inference time — see
+(see AGENTS.md). No network/file I/O here at inference time -- see
 docs/RULES_SUMMARY.md (No Ingress or Egress).
 """
 

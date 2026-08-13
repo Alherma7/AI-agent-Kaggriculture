@@ -13,6 +13,7 @@ from build_agent import (
     _module_to_path,
     _rewrite_internal_imports,
     _top_level_import_block,
+    generate_files,
 )
 
 
@@ -148,3 +149,49 @@ def test_collect_internal_modules_visits_each_module_once(tmp_path):
         "kaggriculture_bot.b",
         "kaggriculture_bot.shared",
     }
+
+
+def test_generate_files_real_baseline_has_no_dependencies():
+    files = generate_files("kaggriculture_bot.strategies.baseline:wheat_loop_agent")
+    assert set(files) == {"main.py"}
+    assert "def agent(obs):" in files["main.py"]
+    assert "GENERATED FILE" in files["main.py"]
+    assert 'market.append(["BUY_SEED", "WHEAT", 1])' in files["main.py"]
+
+
+def test_generate_files_copies_and_rewrites_one_dependency(tmp_path):
+    pkg = tmp_path / "kaggriculture_bot" / "strategies"
+    _write(
+        pkg / "foo.py",
+        "from kaggriculture_bot.helper import VALUE\n"
+        "\n"
+        "\n"
+        "def foo_agent(obs):\n"
+        "    return VALUE\n",
+    )
+    _write(tmp_path / "kaggriculture_bot" / "helper.py", "VALUE = 42\n")
+
+    files = generate_files("kaggriculture_bot.strategies.foo:foo_agent", src_root=tmp_path)
+
+    assert set(files) == {"main.py", "helper.py"}
+    assert files["helper.py"] == "VALUE = 42\n"
+    assert "from helper import VALUE" in files["main.py"]
+    assert "def agent(obs):\n    return VALUE\n" in files["main.py"]
+
+
+def test_generate_files_raises_on_flat_name_collision(tmp_path):
+    strat = tmp_path / "kaggriculture_bot" / "strategies"
+    _write(
+        strat / "foo.py",
+        "from kaggriculture_bot.a.helper import X\n"
+        "from kaggriculture_bot.b.helper import Y\n"
+        "\n"
+        "\n"
+        "def foo_agent(obs):\n"
+        "    return X + Y\n",
+    )
+    _write(tmp_path / "kaggriculture_bot" / "a" / "helper.py", "X = 1\n")
+    _write(tmp_path / "kaggriculture_bot" / "b" / "helper.py", "Y = 2\n")
+
+    with pytest.raises(ValueError, match="collision"):
+        generate_files("kaggriculture_bot.strategies.foo:foo_agent", src_root=tmp_path)

@@ -6,7 +6,7 @@ PACKAGE = "kaggriculture_bot"
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 AGENT_DIR = Path(__file__).resolve().parent.parent / "agent" 
 STRATEGY = "kaggriculture_bot.strategies.baseline:wheat_loop_agent"
-MAIN_HEADER = """Submission entrypoint. Must define `agent(obs)` -> action dict.
+MAIN_HEADER = '''"""Submission entrypoint. Must define `agent(obs)` -> action dict.
 
 GENERATED FILE -- do not edit by hand. Edit the strategy in
 src/kaggriculture_bot/strategies/ and re-run the generator.
@@ -14,9 +14,9 @@ src/kaggriculture_bot/strategies/ and re-run the generator.
 This is the "production" pipeline: only strategies that graduated from
 notebooks/ + evaluate.py (see RESOURCES.md, PROGRESS.md) get wired in here.
 Packaged and submitted via `kaggle competitions submit kaggriculture -f ...`
-(see AGENTS.md). No network/file I/O here at inference time — see
+(see AGENTS.md). No network/file I/O here at inference time -- see
 docs/RULES_SUMMARY.md (No Ingress or Egress).
-"""
+"""'''
 
 def _module_to_path(module_name, src_root):
     if not module_name.startswith(PACKAGE + "."):
@@ -82,3 +82,42 @@ def _collect_internal_modules(module_name, src_root, collected):
     tree = ast.parse(source)
     for node in _internal_import_nodes(tree):
         _collect_internal_modules(node.module, src_root, collected)
+
+
+def generate_files(strategy_path, src_root=SRC_ROOT):
+    module_name, func_name = strategy_path.split(":")
+    module_source = _module_to_path(module_name, src_root).read_text(encoding="utf-8")
+    func_source = _function_source(module_source, func_name)
+    func_source = func_source.replace(f"def {func_name}(", "def agent(", 1)
+
+    deps = {}
+    tree = ast.parse(module_source)
+    for node in _internal_import_nodes(tree):
+        _collect_internal_modules(node.module, src_root, deps)
+
+    flat_names = [_flat_name(name) for name in deps]
+    if len(flat_names) != len(set(flat_names)):
+        raise ValueError("flat filename collision among internal dependencies")
+
+    import_block = _top_level_import_block(module_source)
+    main_body = MAIN_HEADER + "\n\n\n"
+    if import_block:
+        main_body += import_block + "\n\n"
+    main_body += func_source
+
+    files = {"main.py": main_body}
+    for dep_name, source in deps.items():
+        files[_flat_name(dep_name)] = source
+    return files
+
+
+def main():
+    files = generate_files(STRATEGY)
+    AGENT_DIR.mkdir(exist_ok=True)
+    for name, content in files.items():
+        (AGENT_DIR / name).write_text(content, encoding="utf-8")
+        print(f"wrote agent/{name}")
+
+
+if __name__ == "__main__":
+    main()
