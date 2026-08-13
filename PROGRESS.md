@@ -89,6 +89,31 @@ real state of `src/` and `agent/main.py`.
   `read_text`/`write_text` calls, per the risk flagged in the prior
   session's notebook (Windows defaults to cp1252, which had already
   silently mis-encoded the em-dash in this same header once).
+- 2026-08-13 — Analyzed the real Kaggle leaderboard replay for our v1
+  submission (`92035136.json`, untracked in repo root — downloaded from
+  kaggle.com, not yet moved to `replays/`): lost to `HechtJP`, 3343 vs
+  34231. Extracted both players' `action` sequences directly from the
+  replay's `steps` to compare behavior:
+  - Our wheat-loop agent: `farmer` action is `PASS` on 660/720 turns
+    (91.7%) — it only ever tends the single tile it starts on, never
+    moves, never hires hands, only ever plants `WHEAT`.
+  - `HechtJP`: farmer moves every day (`NORTH`/`SOUTH`/`EAST`/`WEST` sum
+    to 427 of its own actions), hires ~3 farm hands *every single day*
+    (89 `HIRE` orders ≈ 30 days × 3 — cheap, since Fibonacci hire cost
+    resets daily: 3 hands costs $1+$1+$2=$4/day), and gives those hands
+    the same tile-tending logic (hands' combined actions exceed 1800,
+    dwarfing the farmer's own). Plants `WHEAT`/`CARROT`/`MELON`, not just
+    wheat. Never issues `BUY_LAND` — stays in the free NW quadrant
+    (5x5=25 tiles) the whole game, so land expansion isn't required to
+    beat this bar.
+  - Confirmed via `README.md`: farmer and hands spawn at the shed
+    `(4,4)` at the start of every day (matches the replay's farmer
+    position resetting to `(4,4)` exactly every 24 turns), and hands
+    disappear at end-of-day (must be re-hired daily).
+  - Revised Level 2 priority based on this: farmer movement first
+    (single agent, multiple tiles), then hiring hands (same logic,
+    parallelized) — ahead of per-tile crop ROI, since one agent tending
+    one tile has a low ceiling regardless of which crop it grows.
 
 ## Next steps
 
@@ -131,16 +156,32 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       guards against drift. See
       `docs/superpowers/specs/2026-08-12-build-agent-script-design.md`.
 - [x] Submit v1 (`agent/main.py`, wheat-loop) to Kaggle — replay uploaded.
-      Leaderboard result not logged yet.
+      Leaderboard result: lost to `HechtJP`, 3343 vs 34231 (episode
+      92035136). See 2026-08-13 log entry for what that replay revealed.
 
 ### Level 2 — Resource management
 
+- [ ] **Farmer movement** — farmer currently never moves (see
+      2026-08-13 log entry); make it traverse multiple tiles in the NW
+      quadrant instead of tending only its starting tile. Route:
+      (1) confirm movement-op mechanics in AGENTS.md/README.md, (2) decide
+      a traversal strategy, (3) prototype in
+      `notebooks/05_farmer_movement.ipynb`, (4) validate via `evaluate.py`
+      against the current single-tile wheat-loop baseline (not just
+      random/starter), (5) graduate to `src/kaggriculture_bot/strategies/`
+      and regenerate `agent/main.py`.
+- [ ] Hire farm hands daily (cheap — Fibonacci cost resets each day) and
+      give each the same tile-tending logic as the farmer, once farmer
+      movement (above) is validated — biggest single lever seen in the
+      HechtJP replay, bigger than movement alone.
 - [ ] Per-tile crop choice by ROI (the Yield/tile/day column in README.md)
+      — diversify beyond wheat-only (HechtJP also grew CARROT/MELON)
 - [ ] Price-aware selling (avoid crashing premium goods to the $1 floor by
       dumping full inventory at once)
 - [ ] Animals: coop/pasture, feed, care, fertilizer loop
-- [ ] Hire farm hands / buy land only when projected ROI beats the cost
-      (Fibonacci hire cost, $1k/$2k/$4k land cost)
+- [ ] Buy land only when projected ROI beats the cost ($1k/$2k/$4k) —
+      note HechtJP never bought land in the replay we studied, stayed in
+      the free NW quadrant the whole game
 
 ### Level 3 — Turn-by-turn planning
 
