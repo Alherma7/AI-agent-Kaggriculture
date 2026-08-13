@@ -32,3 +32,39 @@ def _function_source(source, func_name):
             lines = source.splitlines(keepends=True)
             return "".join(lines[node.lineno - 1 : node.end_lineno])
     raise ValueError(f"function {func_name!r} not found")
+
+
+def _internal_import_nodes(tree):
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.startswith(PACKAGE + ".")
+        ):
+            yield node
+
+
+def _rewrite_internal_imports(source):
+    tree = ast.parse(source)
+    lines = source.splitlines(keepends=True)
+    for node in _internal_import_nodes(tree):
+        if node.lineno != node.end_lineno:
+            raise ValueError(
+                f"multi-line internal import not supported: {node.module}"
+            )
+        flat_module = node.module.rsplit(".", 1)[-1]
+        lines[node.lineno - 1] = lines[node.lineno - 1].replace(
+            f"from {node.module} import", f"from {flat_module} import"
+        )
+    return "".join(lines)
+
+
+def _top_level_import_block(source):
+    rewritten = _rewrite_internal_imports(source)
+    tree = ast.parse(source)
+    lines = rewritten.splitlines(keepends=True)
+    chunks = []
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            chunks.append("".join(lines[node.lineno - 1 : node.end_lineno]))
+    return "".join(chunks)

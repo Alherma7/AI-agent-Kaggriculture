@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from build_agent import _function_source, _module_to_path
+from build_agent import (
+    _function_source,
+    _module_to_path,
+    _rewrite_internal_imports,
+    _top_level_import_block,
+)
 
 
 def test_module_to_path_resolves_dotted_module():
@@ -45,3 +50,48 @@ def test_function_source_extracts_exact_function_text():
 def test_function_source_raises_if_not_found():
     with pytest.raises(ValueError, match="not found"):
         _function_source("def other(obs):\n    return None\n", "wheat_loop_agent")
+
+
+def test_rewrite_internal_imports_flattens_internal_import():
+    source = "from kaggriculture_bot.config import CROPS\n\nX = CROPS\n"
+    result = _rewrite_internal_imports(source)
+    assert result == "from config import CROPS\n\nX = CROPS\n"
+
+
+def test_rewrite_internal_imports_leaves_external_imports_untouched():
+    source = (
+        "from kaggle_environments.envs.kaggriculture.kaggriculture import (\n"
+        "    CROPS,\n"
+        "    ANIMALS,\n"
+        ")\n"
+        "import random\n"
+    )
+    assert _rewrite_internal_imports(source) == source
+
+
+def test_rewrite_internal_imports_rejects_multiline_internal_import():
+    source = (
+        "from kaggriculture_bot.config import (\n"
+        "    CROPS,\n"
+        ")\n"
+    )
+    with pytest.raises(ValueError, match="multi-line internal import"):
+        _rewrite_internal_imports(source)
+
+
+def test_top_level_import_block_collects_only_top_level_imports_in_order():
+    source = (
+        "import random\n"
+        "from kaggriculture_bot.config import CROPS\n"
+        "\n"
+        "\n"
+        "def agent(obs):\n"
+        "    import os\n"
+        "    return CROPS\n"
+    )
+    result = _top_level_import_block(source)
+    assert result == "import random\nfrom config import CROPS\n"
+
+
+def test_top_level_import_block_empty_when_no_imports():
+    assert _top_level_import_block("def agent(obs):\n    return obs\n") == ""
