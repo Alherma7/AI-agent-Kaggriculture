@@ -1,3 +1,11 @@
+# Kaggriculture Agent — Alejandro Hernández Mairal
+
+![wheat_loop_12_agent mid-game](kaggriculture_agent_v2.png)
+
+Heuristic agent for the Kaggriculture Kaggle simulation competition, built up incrementally: a single-tile wheat loop, then farmer movement over a growing closed tile loop (currently 12 tiles, `wheat_loop_12_agent`). See [`PROGRESS.md`](PROGRESS.md) for the full development log and [`RESOURCES.md`](RESOURCES.md) for sources.
+
+---
+
 # Kaggriculture
 
 A farming sim where two players compete to maximize their income from farming by selling to a dynamic market.
