@@ -114,6 +114,95 @@ real state of `src/` and `agent/main.py`.
     (single agent, multiple tiles), then hiring hands (same logic,
     parallelized) — ahead of per-tile crop ROI, since one agent tending
     one tile has a low ceiling regardless of which crop it grows.
+- 2026-08-19 — `notebooks/05_farmer_movement.ipynb`: built and validated
+  the first Level 2 increment — farmer movement over a closed 2x2 tile
+  loop (`(4,4) → (4,3) → (3,3) → (3,4) → (4,4)`, the 4 tiles closest to
+  the shed spawn point). Confirmed empirically (not assumed) that `NORTH`
+  decrements `y` before writing the direction mapping. Two bugs found and
+  fixed along the way, both via `evaluate.py` against `wheat_loop_agent`
+  (not just random/starter, per the roadmap's step 4):
+  - First working draft evaluated as a **loss**: `wheat_loop_agent` beat
+    the movement version 20/20. Root cause (found via replay inspection,
+    not guessed): once a tile held a growing crop, the "already
+    watered today, nothing to do" case fell through to `PASS` instead of
+    to the movement branch, so the farmer camped the first tile it moved
+    to for its entire growth cycle (~20 turns/day of `PASS`) and never
+    reached the other 3 tiles. Fix: that case now returns the same
+    move-to-next-tile action as the empty/no-seed case.
+  - After the fix: `wheat_loop_agent` loses 20/20
+    (`evaluate(wheat_loop_agent, wheat_loop_2x2_agent, n=20)` →
+    `win_rate=0.0` for the baseline). `avg_money`: baseline ~3300-3385
+    across two independent `evaluate()` calls (fresh `env` each time) vs.
+    ~4293 for the 2x2 loop version — roughly +29% money.
+  - Harness note for future evaluations: within a single `evaluate()`/
+    `run_episodes()` call, the `n` episodes reuse one `env` object and
+    came back bit-for-bit identical every time in this matchup (no
+    randomness triggered across the reused object's `.run()` calls);
+    genuine variance only showed up **between** separate calls (fresh
+    `env` via `make()` each time — consistent with the 2026-08-10 entry's
+    "re-running the same matchup swung by >100 points"). For a
+    trustworthy read, call `evaluate()` more than once rather than
+    trusting a single call's `n`.
+  - Known, deliberately deferred gap: on day 0 the farmer moves off
+    `(4,4)` before it has a seed to plant (seed isn't available until the
+    turn after `BUY_SEED` resolves), so that one tile isn't planted until
+    the loop comes back around (~10 turns later) instead of on arrival.
+    One-time startup cost, not fixed — see Next steps.
+  - Graduated to
+    `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_2x2_agent`
+    (docstring cites this entry and the 2026-08-13 replay finding), with
+    9 new unit tests in `tests/test_baseline.py` (loop-order structure,
+    direction mapping, and a regression test for the `PASS`-trap bug).
+    `RESOURCES.md` updated. **Not yet wired into `agent/main.py`** —
+    `scripts/build_agent.py`'s `STRATEGY` constant still points at
+    `wheat_loop_agent`; switching the submitted agent is a separate step.
+- 2026-08-19 — `notebooks/06_farmer_movement_12_tile_loop.ipynb`: pushed
+  the tile loop from 4 to 12 tiles, deliberately targeting the ~12
+  tiles/day ceiling derived in the previous entry (24 turns/day, ~2
+  turns per new tile) rather than an arbitrary size. Loop shape: the
+  2-row rectangle spanning `y=3..4` (10 tiles, all of `x=0..4`) plus a
+  2-tile detour into `y=2` between `(2,3)` and `(3,3)` — hand-built and
+  verified adjacent/non-repeating the same way as the 2x2 loop, no new
+  entries needed in `DIRECTIONS` (all 4 compass directions were already
+  covered). Same stateless design as `wheat_loop_2x2_agent` (harvest >
+  water > plant > move to next tile in the loop); the `PASS`-trap bug
+  from the previous entry didn't recur since the fix was reused as-is.
+  Validated against the **current best**, `wheat_loop_2x2_agent` — not
+  the original 1-tile baseline, per this project's "recompute the
+  baseline in the same run" rule (`structuring-ml-projects` step 4):
+  `evaluate(wheat_loop_2x2_agent, wheat_loop_12_agent, n=20)` →
+  `win_rate=0.0` for the 2x2 loop across two independent calls,
+  `avg_money` 4301.0 and 4413.0 for the 2x2 loop (losing side) vs. more
+  for the 12-tile version. Graduated to
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_12_agent`,
+  7 new unit tests in `tests/test_baseline.py` (12-tile loop structure,
+  behavior on the plain stretch and specifically on the 2-tile detour).
+  `RESOURCES.md` updated. Same day-0 startup gap as `wheat_loop_2x2_agent`
+  applies here too (now potentially delaying more tiles' first planting
+  by a full lap) — still not fixed, see Next steps.
+- 2026-08-19 — Wired `wheat_loop_12_agent` into `agent/main.py` for
+  submission. Found and fixed a real gap in `scripts/build_agent.py`
+  first: it only ever collected cross-module dependencies (things
+  imported via `kaggriculture_bot.*`), never same-module top-level
+  constants a strategy function references directly — irrelevant for
+  `wheat_loop_agent` (fully self-contained) but `wheat_loop_2x2_agent`/
+  `wheat_loop_12_agent` both read `LOOP_ORDER_*`/`DIRECTIONS` module
+  constants, so generating without a fix would have shipped an
+  `agent/main.py` that crashed with `NameError` on its first move. Added
+  `_top_level_constants`/`_referenced_constant_block` (transitive, so a
+  constant referencing another constant is still pulled in fully), 7 new
+  unit tests in `tests/test_build_agent.py` (including one against the
+  real `wheat_loop_2x2_agent` confirming only the constants it actually
+  uses get included, not `LOOP_ORDER_12`). Regenerated `agent/main.py`
+  via `python scripts/build_agent.py` after switching `STRATEGY` to
+  `wheat_loop_12_agent`; `test_agent_dir_matches_generated_output` still
+  passes. Ran the generated file standalone (imported exactly as Kaggle
+  would run it, not via the `src/` package) through `evaluate.py` against
+  `wheat_loop_2x2_agent` as an end-to-end check, not just a text diff:
+  `win_rate=0.0` for the 2x2 loop, `avg_money=4480.0` — confirms the
+  generated file behaves identically to the graduated `src/` version.
+  **Not yet actually submitted to Kaggle** — that's a separate,
+  externally-visible action, left for explicit confirmation.
 
 ## Next steps
 
@@ -161,15 +250,25 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
 
 ### Level 2 — Resource management
 
-- [ ] **Farmer movement** — farmer currently never moves (see
-      2026-08-13 log entry); make it traverse multiple tiles in the NW
-      quadrant instead of tending only its starting tile. Route:
-      (1) confirm movement-op mechanics in AGENTS.md/README.md, (2) decide
-      a traversal strategy, (3) prototype in
-      `notebooks/05_farmer_movement.ipynb`, (4) validate via `evaluate.py`
-      against the current single-tile wheat-loop baseline (not just
-      random/starter), (5) graduate to `src/kaggriculture_bot/strategies/`
-      and regenerate `agent/main.py`.
+- [x] **Farmer movement (first increment)** — 2x2 tile loop, graduated as
+      `wheat_loop_2x2_agent` (see 2026-08-19 log entry). Beats
+      `wheat_loop_agent` decisively (~+29% avg_money, 20/20 wins).
+- [x] **Farmer movement (second increment)** — pushed to a 12-tile loop
+      (the ~12-tile/day ceiling: 24 turns/day, ~2 turns/tile), graduated
+      as `wheat_loop_12_agent` (see 2026-08-19 log entry). Beats
+      `wheat_loop_2x2_agent` decisively, 20/20 across two runs.
+      Both movement agents not yet wired into `agent/main.py`.
+- [ ] Fix the day-0 startup gap noted in the 2026-08-19 log entries
+      (farmer moves off `(4,4)` before its first seed arrives, delaying
+      that tile's first planting by a full lap — now potentially several
+      tiles' worth with 12) — measure its actual cost first before
+      adding the complexity.
+- [x] Wired `wheat_loop_12_agent` into `scripts/build_agent.py`'s
+      `STRATEGY` constant and regenerated `agent/main.py` (see 2026-08-19
+      log entry — required a real fix to `build_agent.py` first, since it
+      didn't handle same-module constants until now).
+- [ ] Submit `agent/main.py` (`wheat_loop_12_agent`) to Kaggle as v2 —
+      prepared and validated end-to-end, not yet actually submitted.
 - [ ] Hire farm hands daily (cheap — Fibonacci cost resets each day) and
       give each the same tile-tending logic as the farmer, once farmer
       movement (above) is validated — biggest single lever seen in the

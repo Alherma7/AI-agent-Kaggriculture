@@ -5,7 +5,7 @@ from pathlib import Path
 PACKAGE = "kaggriculture_bot"
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 AGENT_DIR = Path(__file__).resolve().parent.parent / "agent" 
-STRATEGY = "kaggriculture_bot.strategies.baseline:wheat_loop_agent"
+STRATEGY = "kaggriculture_bot.strategies.baseline:wheat_loop_12_agent"
 MAIN_HEADER = '''"""Submission entrypoint. Must define `agent(obs)` -> action dict.
 
 GENERATED FILE -- do not edit by hand. Edit the strategy in
@@ -59,6 +59,51 @@ def _rewrite_internal_imports(source):
     return "".join(lines)
 
 
+def _top_level_constants(source):
+    """Map constant NAME -> its exact source text, for simple top-level
+    `NAME = ...` assignments (e.g. LOOP_ORDER_2X2 in strategies/baseline.py)."""
+    tree = ast.parse(source)
+    lines = source.splitlines(keepends=True)
+    constants = {}
+    for node in ast.iter_child_nodes(tree):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+        ):
+            name = node.targets[0].id
+            constants[name] = "".join(lines[node.lineno - 1 : node.end_lineno])
+    return constants
+
+
+def _names_referenced(source):
+    """All Name(ctx=Load) identifiers appearing anywhere in `source`."""
+    tree = ast.parse(source)
+    return {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+
+
+def _referenced_constant_block(module_source, func_source):
+    """Source for every top-level constant (transitively) referenced by
+    func_source, in the order they're declared in the module -- so a
+    strategy function that reads a same-module constant (not just a
+    cross-module import) still works standalone in agent/main.py."""
+    constants = _top_level_constants(module_source)
+    referenced = set()
+    worklist = _names_referenced(func_source) & set(constants)
+    while worklist:
+        name = worklist.pop()
+        if name in referenced:
+            continue
+        referenced.add(name)
+        worklist |= _names_referenced(constants[name]) & set(constants)
+    ordered_names = [name for name in constants if name in referenced]
+    return "".join(constants[name] for name in ordered_names)
+
+
 def _top_level_import_block(source):
     rewritten = _rewrite_internal_imports(source)
     tree = ast.parse(source)
@@ -88,6 +133,7 @@ def generate_files(strategy_path, src_root=SRC_ROOT):
     module_name, func_name = strategy_path.split(":")
     module_source = _module_to_path(module_name, src_root).read_text(encoding="utf-8")
     func_source = _function_source(module_source, func_name)
+    constants_block = _referenced_constant_block(module_source, func_source)
     func_source = func_source.replace(f"def {func_name}(", "def agent(", 1)
 
     deps = {}
@@ -103,6 +149,8 @@ def generate_files(strategy_path, src_root=SRC_ROOT):
     main_body = MAIN_HEADER + "\n\n\n"
     if import_block:
         main_body += import_block + "\n\n"
+    if constants_block:
+        main_body += constants_block + "\n\n"
     main_body += func_source
 
     files = {"main.py": main_body}

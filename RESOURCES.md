@@ -22,6 +22,28 @@ function's docstring.
   unit/turn instead of dumping the whole shed, per the sell-all-vs-sell-one
   test logged in `PROGRESS.md` (2026-08-10).
 
+- **Kaggriculture leaderboard replay `92035136.json`** (downloaded from
+  kaggle.com, our v1 submission vs. `HechtJP`; analyzed 2026-08-13,
+  logged in `PROGRESS.md`)
+  Why: showed the concrete gap between `wheat_loop_agent` and a real
+  winning opponent — a farmer that moves and tends multiple tiles beats
+  one that camps a single tile, regardless of crop choice. Source for
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_2x2_agent`
+  (validated in `notebooks/05_farmer_movement.ipynb`, tested in
+  `tests/test_baseline.py`): reuses `wheat_loop_agent`'s own
+  harvest > water > plant priority at each tile, adding "move to the next
+  tile in a closed 2x2 loop" as the fallback once a tile needs nothing
+  more today.
+- **`README.md`'s `turnsPerDay` (24) and movement/action cost rules**
+  Why: source for the ~12-tiles/day ceiling (24 turns / ~2 turns per new
+  tile) that motivated
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_12_agent`
+  (validated in `notebooks/06_farmer_movement_12_tile_loop.ipynb`, tested
+  in `tests/test_baseline.py`): same design as `wheat_loop_2x2_agent`,
+  with `LOOP_ORDER_2X2` swapped for a 12-tile closed loop
+  (`LOOP_ORDER_12`) that pushes deliberately to that ceiling rather than
+  an arbitrary size.
+
 - **`notebooks/kaggriculture-getting-started.ipynb`** (bovard, official Kaggle
   starter kernel)
   Why: confirms `obs` supports both `.get()` and dotted attribute access;

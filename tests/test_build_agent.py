@@ -13,7 +13,9 @@ from build_agent import (
     _flat_name,
     _function_source,
     _module_to_path,
+    _referenced_constant_block,
     _rewrite_internal_imports,
+    _top_level_constants,
     _top_level_import_block,
     generate_files,
 )
@@ -82,6 +84,39 @@ def test_rewrite_internal_imports_rejects_multiline_internal_import():
     )
     with pytest.raises(ValueError, match="multi-line internal import"):
         _rewrite_internal_imports(source)
+
+
+def test_top_level_constants_collects_simple_module_level_assignments():
+    source = (
+        "A = {1: 2}\n"
+        "B = 'x'\n"
+        "\n"
+        "def agent(obs):\n"
+        "    local = 1\n"
+        "    return A\n"
+    )
+    constants = _top_level_constants(source)
+    assert constants == {"A": "A = {1: 2}\n", "B": "B = 'x'\n"}
+    assert "local" not in constants  # not top-level, not collected
+
+
+def test_referenced_constant_block_includes_only_names_the_function_uses():
+    module_source = "A = {1: 2}\nB = {3: 4}\n"
+    func_source = "def agent(obs):\n    return B\n"
+    assert _referenced_constant_block(module_source, func_source) == "B = {3: 4}\n"
+
+
+def test_referenced_constant_block_empty_when_function_uses_no_constants():
+    module_source = "A = {1: 2}\n"
+    func_source = "def agent(obs):\n    return obs\n"
+    assert _referenced_constant_block(module_source, func_source) == ""
+
+
+def test_referenced_constant_block_follows_transitive_references_in_declaration_order():
+    # B references A; a function that only names B must still pull in A.
+    module_source = "A = {1: 2}\nB = A\nC = {5: 6}\n"
+    func_source = "def agent(obs):\n    return B\n"
+    assert _referenced_constant_block(module_source, func_source) == "A = {1: 2}\nB = A\n"
 
 
 def test_top_level_import_block_collects_only_top_level_imports_in_order():
@@ -179,6 +214,33 @@ def test_generate_files_copies_and_rewrites_one_dependency(tmp_path):
     assert files["helper.py"] == "VALUE = 42\n"
     assert "from helper import VALUE" in files["main.py"]
     assert "def agent(obs):\n    return VALUE\n" in files["main.py"]
+
+
+def test_generate_files_includes_referenced_module_level_constant(tmp_path):
+    pkg = tmp_path / "kaggriculture_bot" / "strategies"
+    _write(
+        pkg / "foo.py",
+        "UNUSED = {9: 9}\n"
+        "TABLE = {1: 2}\n"
+        "\n"
+        "\n"
+        "def foo_agent(obs):\n"
+        "    return TABLE[1]\n",
+    )
+
+    files = generate_files("kaggriculture_bot.strategies.foo:foo_agent", src_root=tmp_path)
+
+    assert set(files) == {"main.py"}
+    assert "TABLE = {1: 2}" in files["main.py"]
+    assert "UNUSED" not in files["main.py"]  # not referenced, must not leak in
+
+
+def test_generate_files_real_2x2_agent_includes_its_constants():
+    files = generate_files("kaggriculture_bot.strategies.baseline:wheat_loop_2x2_agent")
+    assert set(files) == {"main.py"}
+    assert "LOOP_ORDER_2X2 = {" in files["main.py"]
+    assert "DIRECTIONS = {" in files["main.py"]
+    assert "LOOP_ORDER_12" not in files["main.py"]  # not used by this agent
 
 
 def test_generate_files_raises_on_flat_name_collision(tmp_path):
