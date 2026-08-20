@@ -203,6 +203,34 @@ real state of `src/` and `agent/main.py`.
   generated file behaves identically to the graduated `src/` version.
   **Not yet actually submitted to Kaggle** — that's a separate,
   externally-visible action, left for explicit confirmation.
+- 2026-08-20 — Submitted v2 (`agent/main.py`, `wheat_loop_12_agent`) to
+  Kaggle. Leaderboard score improved ~30 points over v1 (reported by
+  project owner; exact leaderboard scoring formula not independently
+  re-derived here). Analyzed the real leaderboard replay
+  (`94568249.json`, saved to `replays/`, gitignored per `replays/*.json`
+  — not in the repo) the same way the 2026-08-13 entry analyzed v1's:
+  extracted both players' `action` sequences from `steps`. Still a loss,
+  to `Muhammed Ali Kul`, 5737 vs 111496 — our money is up sharply from
+  v1's 3343 (+72%), but the opponent's is over 3x HechtJP's 34231, so the
+  gap widened, not narrowed.
+  - Our agent: exactly the behavior `wheat_loop_12_agent` was validated
+    for — 0 hands hired across all 720 turns, WHEAT-only, no land
+    purchases, no animals. Farmer action counts: `WATER` 228, `PLANT`
+    125, `HARVEST` 114, movement (`WEST`/`EAST`/`NORTH`/`SOUTH`) 252
+    combined, `PASS` only 1 — confirms the 12-tile loop runs as designed
+    (near-zero idle turns), so this loss is entirely about missing
+    capabilities, not a bug in the loop itself.
+  - Opponent: hired up to 10 hands (251 `HIRE` orders; held at 10 hands
+    for 348/720 turns, the largest single bucket in the hand-count
+    distribution), ran a full animal loop (`FEED` 162, `CARE` 30,
+    `COLLECT_FERTILIZER` 19, `FERTILIZE` 3, `BUILD_PASTURE` 2,
+    `BUY_ANIMAL` 10, `BUY_PRODUCT` 21), bought land twice, and
+    diversified into `STRAWBERRY` alongside `WHEAT`.
+  - Confirms the 2026-08-13 replay's priority call (farm hands first)
+    still holds — 10 hands vs. our 0 is an even bigger gap than the ~3
+    hands/day HechtJP used — and surfaces animals as a second lever of
+    comparable size, not previously visible in the HechtJP replay (which
+    had zero animal actions).
 
 ## Next steps
 
@@ -257,7 +285,6 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       (the ~12-tile/day ceiling: 24 turns/day, ~2 turns/tile), graduated
       as `wheat_loop_12_agent` (see 2026-08-19 log entry). Beats
       `wheat_loop_2x2_agent` decisively, 20/20 across two runs.
-      Both movement agents not yet wired into `agent/main.py`.
 - [ ] Fix the day-0 startup gap noted in the 2026-08-19 log entries
       (farmer moves off `(4,4)` before its first seed arrives, delaying
       that tile's first planting by a full lap — now potentially several
@@ -267,12 +294,16 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       `STRATEGY` constant and regenerated `agent/main.py` (see 2026-08-19
       log entry — required a real fix to `build_agent.py` first, since it
       didn't handle same-module constants until now).
-- [ ] Submit `agent/main.py` (`wheat_loop_12_agent`) to Kaggle as v2 —
-      prepared and validated end-to-end, not yet actually submitted.
+- [x] Submit `agent/main.py` (`wheat_loop_12_agent`) to Kaggle as v2.
+      Leaderboard result: lost to `Muhammed Ali Kul`, 5737 vs 111496
+      (episode 94568249). See 2026-08-20 log entry for what that replay
+      revealed — confirms farm hands as the top-priority gap and surfaces
+      animals as a second major lever.
 - [ ] Hire farm hands daily (cheap — Fibonacci cost resets each day) and
       give each the same tile-tending logic as the farmer, once farmer
-      movement (above) is validated — biggest single lever seen in the
-      HechtJP replay, bigger than movement alone.
+      movement (above) is validated — biggest single lever seen in both
+      the HechtJP (2026-08-13) and Muhammed Ali Kul (2026-08-20) replays;
+      the latter used up to 10 hands vs. our 0.
 - [ ] Per-tile crop choice by ROI (the Yield/tile/day column in README.md)
       — diversify beyond wheat-only (HechtJP also grew CARROT/MELON)
 - [ ] Price-aware selling (avoid crashing premium goods to the $1 floor by
