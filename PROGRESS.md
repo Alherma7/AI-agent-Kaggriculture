@@ -231,6 +231,65 @@ real state of `src/` and `agent/main.py`.
     hands/day HechtJP used — and surfaces animals as a second lever of
     comparable size, not previously visible in the HechtJP replay (which
     had zero animal actions).
+- 2026-08-21 — `notebooks/07_farm_hands.ipynb`: built and validated the
+  first hands increment — hire up to 5 hands daily (batched on the first
+  turn of each day) and give each `wheat_loop_12_agent`'s own
+  harvest > water > plant > move priority against a second, 16-tile loop
+  (`LOOP_ORDER_HANDS`). Two real findings from mini-tests against a real
+  `obs` (not assumed):
+  - Hands don't spawn at `(4,4)` — `kaggriculture.py::_spawn_hand` places
+    each new hand at the least-occupied of the 4 shed-access corners, and
+    since the farmer permanently occupies `(4,4)`, new hands mostly land
+    on the other 3, which are `"LOCKED"` (a string, not a tile dict) until
+    that quadrant is bought. Without a guard, `.get("kind")` on a
+    `"LOCKED"` tile raises `AttributeError` — 4 of 5 hands would have
+    crashed on their first turn. Fixed with an explicit `"LOCKED"` check
+    (treated like the empty-tile "nothing to do, move on" branch) plus
+    `SPAWN_FEEDER`, routing a hand from a locked spawn corner one step
+    into `LOOP_ORDER_HANDS`'s entry point.
+  - With up to 6 units (farmer + 5 hands) all wanting to plant, buying 1
+    seed/turn (like `wheat_loop_12_agent`) starves most of them — switched
+    to buying up to 6 in stock at once.
+  - Validated against the current best,
+    `evaluate(wheat_loop_12_agent, wheat_loop_hands_agent, n=20)` →
+    `win_rate=0.0` for `wheat_loop_12_agent` across two independent calls
+    (`avg_money` 4775.0 and 4685.0 for the losing baseline). Graduated to
+    `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_hands_agent`,
+    12 new unit tests in `tests/test_baseline.py`. `RESOURCES.md` updated.
+  - Known, deliberately deferred gaps: `(0,2)`/`(1,2)` still uncovered by
+    either loop; the day-0 startup gap noted for `wheat_loop_12_agent`
+    applies here too, now for up to 6 units.
+- 2026-08-21 — Bug found in `wheat_loop_hands_agent` after the entry
+  above: instrumented a full local episode and found all 5 hands
+  permanently merge onto a single tile a few turns into day 0 and stay
+  glued together for the rest of the day. Root cause: every hand's action
+  was a pure function of its current tile — nothing distinguished one
+  hand from another, so the moment two hands landed on the same tile
+  (easy, since they all funnel through the shared entry point `(4,4)`),
+  they computed identical actions forever after. Cross-checked against
+  the real `Muhammed Ali Kul` replay (`replays/94568249.json`): their
+  hands also overlap occasionally (473/720 turns with ≥2 units sharing a
+  tile) but never stay merged more than 2 consecutive turns — confirming
+  this was a real behavioral bug, not just normal traffic.
+  - Fix: `HAND_ZONES`, splitting the 13 free NW tiles into 5
+    pairwise-disjoint private loops, one per hand index (the hands list's
+    order is stable turn to turn — confirmed empirically — so list
+    position works as a de facto ID). Each hand still approaches via the
+    shared `LOOP_ORDER_HANDS`/`SPAWN_FEEDER` path; its zone only
+    overrides the tile(s) where it should peel off into its own loop
+    instead of continuing on the shared one. Bonus: also finally covers
+    `(0,2)`/`(1,2)`, the gap noted as untended in the previous entry.
+  - Validated in `notebooks/07_farm_hands.ipynb` against the current best
+    (`wheat_loop_hands_agent` pre-fix): the un-zoned version loses 20/20
+    across **three** independent `evaluate()` runs (`avg_money` 6003.0,
+    6524.0, 5856.0 for the losing, un-zoned version). Graduated the fix
+    into `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_hands_agent`
+    in place (same function name, new `HAND_ZONES`-based hands logic), 3
+    new unit tests in `tests/test_baseline.py` (zone disjointness/cycle
+    validity, two hands on one tile diverging instead of merging, and the
+    single-tile zone's `PASS` fallback). `RESOURCES.md` updated.
+  - Regenerated `agent/main.py` via `scripts/build_agent.py` (`STRATEGY`
+    unchanged, still `wheat_loop_hands_agent` — only its body changed).
 
 ## Next steps
 
@@ -299,11 +358,14 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       (episode 94568249). See 2026-08-20 log entry for what that replay
       revealed — confirms farm hands as the top-priority gap and surfaces
       animals as a second major lever.
-- [ ] Hire farm hands daily (cheap — Fibonacci cost resets each day) and
-      give each the same tile-tending logic as the farmer, once farmer
-      movement (above) is validated — biggest single lever seen in both
-      the HechtJP (2026-08-13) and Muhammed Ali Kul (2026-08-20) replays;
-      the latter used up to 10 hands vs. our 0.
+- [x] Hire farm hands daily (cheap — Fibonacci cost resets each day) and
+      give each the same tile-tending logic as the farmer — biggest single
+      lever seen in both the HechtJP (2026-08-13) and Muhammed Ali Kul
+      (2026-08-20) replays. Graduated as `wheat_loop_hands_agent`, wired
+      into `agent/main.py`. Found and fixed a real bug the same day
+      (2026-08-21 log entries): hands were permanently merging onto one
+      tile; fixed with `HAND_ZONES` (per-hand disjoint private loops) —
+      beats the un-zoned version decisively, 20/20 across three runs.
 - [ ] Per-tile crop choice by ROI (the Yield/tile/day column in README.md)
       — diversify beyond wheat-only (HechtJP also grew CARROT/MELON)
 - [ ] Price-aware selling (avoid crashing premium goods to the $1 floor by

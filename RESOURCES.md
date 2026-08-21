@@ -44,6 +44,39 @@ function's docstring.
   (`LOOP_ORDER_12`) that pushes deliberately to that ceiling rather than
   an arbitrary size.
 
+- **Kaggriculture leaderboard replays `92035136.json`/`94568249.json`**
+  (our v1/v2 submissions vs. `HechtJP`/`Muhammed Ali Kul`; analyzed
+  2026-08-13/2026-08-20, logged in `PROGRESS.md`) plus
+  `kaggriculture.py::_do_hire`/`_hire_cost`/`_spawn_hand` (engine source,
+  read directly, not assumed -- see `notebooks/07_farm_hands.ipynb`'s
+  mini-tests)
+  Why: both replays showed multiple farm hands as the single biggest gap
+  vs. real opponents (up to 10 hands vs. our 0); the engine confirms
+  hiring is effectively free (Fibonacci cost resets daily) and that hands
+  spawn at the least-occupied shed corner, not always `(4,4)`. Source for
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_hands_agent`
+  (validated in `notebooks/07_farm_hands.ipynb`, tested in
+  `tests/test_baseline.py`): hires up to 5 hands/day and gives each
+  `wheat_loop_12_agent`'s own harvest > water > plant > move priority
+  against a second loop (`LOOP_ORDER_HANDS`), with a `"LOCKED"`-tile guard
+  and `SPAWN_FEEDER` for hands that spawn off that loop.
+
+- **Instrumented episode replays (own local runs) + the Muhammed Ali Kul
+  leaderboard replay's overlap pattern** (analyzed 2026-08-21, logged in
+  `PROGRESS.md`)
+  Why: found that `wheat_loop_hands_agent`'s first graduated version had
+  all 5 hands permanently merge onto one tile within a few turns of the
+  day -- a one-turn tile collision became forever-identical behavior,
+  since every hand's action was a pure function of its current tile with
+  nothing distinguishing one hand from another. The real opponent replay
+  showed transient overlaps that always resolved within 2 turns, which
+  motivated the fix: `HAND_ZONES`, giving each hand index its own
+  private, pairwise-disjoint loop, so a permanent merge is structurally
+  impossible once a hand settles into its zone. Source for the current
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_hands_agent`
+  (validated in `notebooks/07_farm_hands.ipynb`, tested in
+  `tests/test_baseline.py`).
+
 - **`notebooks/kaggriculture-getting-started.ipynb`** (bovard, official Kaggle
   starter kernel)
   Why: confirms `obs` supports both `.get()` and dotted attribute access;

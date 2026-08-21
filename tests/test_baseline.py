@@ -7,9 +7,13 @@ from kaggriculture_bot.strategies.baseline import (
     DIRECTIONS,
     LOOP_ORDER_2X2,
     LOOP_ORDER_12,
+    LOOP_ORDER_HANDS,
+    SPAWN_FEEDER,
+    HAND_ZONES,
     wheat_loop_agent,
     wheat_loop_2x2_agent,
     wheat_loop_12_agent,
+    wheat_loop_hands_agent,
 )
 
 
@@ -228,3 +232,148 @@ def test_12_sells_one_unit_regardless_of_shed_size():
     action = wheat_loop_12_agent(obs)
     assert ["SELL", "WHEAT", 1] in action["market"]
     assert ["SELL", "WHEAT", 5] not in action["market"]
+
+
+def test_loop_order_hands_is_a_single_closed_cycle_of_adjacent_tiles():
+    assert len(LOOP_ORDER_HANDS) == 16
+    assert_is_closed_adjacent_cycle(LOOP_ORDER_HANDS)
+
+
+def test_spawn_feeder_routes_each_locked_corner_one_step_toward_the_loop():
+    # Every SPAWN_FEEDER entry must be orthogonally adjacent to its target,
+    # and eventually reach LOOP_ORDER_HANDS's entry point (4,4).
+    for pos, nxt in SPAWN_FEEDER.items():
+        assert abs(nxt[0] - pos[0]) + abs(nxt[1] - pos[1]) == 1
+        assert nxt == (4, 4) or nxt in SPAWN_FEEDER
+
+
+def make_hands_obs(
+    *, step=5, day=0, seeds=0, shed=0, farmer=(4, 4), hands=(), tiles=None
+):
+    """Build a 6x6-tile obs (covers LOOP_ORDER_HANDS + the SE spawn corner)
+    with a farmer and a list of hands at given positions."""
+    board = [[None] * 6 for _ in range(6)]
+    for (x, y), tile in (tiles or {}).items():
+        board[y][x] = tile
+    return {
+        "player": 0,
+        "step": step,
+        "day": day,
+        "farms": [
+            {
+                "farmer": list(farmer),
+                "hands": [list(h) for h in hands],
+                "tiles": board,
+            }
+        ],
+        "private": {"seeds": {"WHEAT": seeds}, "shed": {"WHEAT": shed}},
+    }
+
+
+def test_hands_hires_while_under_five():
+    obs = make_hands_obs(hands=[(4, 4), (3, 4)])
+    action = wheat_loop_hands_agent(obs)
+    assert ["HIRE"] in action["market"]
+
+
+def test_hands_does_not_hire_at_five():
+    obs = make_hands_obs(hands=[(4, 4), (3, 4), (3, 3), (3, 2), (3, 1)])
+    action = wheat_loop_hands_agent(obs)
+    assert ["HIRE"] not in action["market"]
+
+
+def test_hands_buys_seed_in_batch_up_to_six():
+    obs = make_hands_obs(seeds=2)
+    action = wheat_loop_hands_agent(obs)
+    assert ["BUY_SEED", "WHEAT", 4] in action["market"]
+
+
+def test_hands_does_not_buy_seed_when_stocked_past_six():
+    obs = make_hands_obs(step=100, seeds=6)
+    action = wheat_loop_hands_agent(obs)
+    assert not any(order[0] == "BUY_SEED" for order in action["market"])
+
+
+def test_hand_on_locked_spawn_corner_moves_via_spawn_feeder_instead_of_crashing():
+    # (5,5) is "LOCKED" (unbought quadrant) -- SPAWN_FEEDER routes it toward
+    # (5,4), a NORTH move. Regression check for the AttributeError bug
+    # logged in notebooks/07_farm_hands.ipynb: "LOCKED" is a string, not a
+    # tile dict, and must be guarded before .get("kind") is called.
+    obs = make_hands_obs(hands=[(5, 5)], tiles={(5, 5): "LOCKED"})
+    action = wheat_loop_hands_agent(obs)
+    assert action["hands"] == [["NORTH"]]
+
+
+def test_hand_plants_on_empty_tile_with_seed_in_hand():
+    obs = make_hands_obs(seeds=1, hands=[(3, 1)], tiles={(3, 1): None})
+    action = wheat_loop_hands_agent(obs)
+    assert action["hands"] == [["PLANT", "WHEAT"]]
+
+
+def test_hand_harvests_before_watering_when_both_are_possible():
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": False}
+    obs = make_hands_obs(day=2, hands=[(1, 1)], tiles={(1, 1): tile})
+    action = wheat_loop_hands_agent(obs)
+    assert action["hands"] == [["HARVEST"]]
+
+
+def test_hand_moves_toward_next_loop_tile_when_already_watered():
+    # (3,4) -> (3,3) is NORTH, per LOOP_ORDER_HANDS (NORTH decrements y).
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": True}
+    obs = make_hands_obs(day=0, hands=[(3, 4)], tiles={(3, 4): tile})
+    action = wheat_loop_hands_agent(obs)
+    assert action["hands"] == [["NORTH"]]
+
+
+def test_hand_zones_are_pairwise_disjoint_and_valid_cycles():
+    steady_state = [
+        {(0, 0), (1, 0), (1, 1), (0, 1)},
+        {(2, 0), (3, 0), (3, 1), (2, 1)},
+        {(4, 0), (4, 1)},
+        {(0, 2), (1, 2)},
+        {(4, 2)},
+    ]
+    for i, a in enumerate(steady_state):
+        for j, b in enumerate(steady_state):
+            if i < j:
+                assert not (a & b)
+    for zone, tiles in zip(HAND_ZONES, steady_state):
+        home_only = {k: v for k, v in zone.items() if k in tiles}
+        if len(home_only) == 1:
+            ((tile, target),) = home_only.items()
+            assert tile == target
+        else:
+            assert_is_closed_adjacent_cycle(home_only)
+
+
+def test_two_hands_on_the_same_tile_diverge_by_index_instead_of_merging_forever():
+    # Regression check for the permanent-merge bug logged in PROGRESS.md
+    # (2026-08-21): before HAND_ZONES, every hand computed the same action
+    # from the same tile, so a collision became permanent. Hand 0 and hand
+    # 1 both standing on (2,1) must now move in different directions.
+    obs = make_hands_obs(day=0, hands=[(2, 1), (2, 1)], tiles={(2, 1): None})
+    action = wheat_loop_hands_agent(obs)
+    assert action["hands"][0] != action["hands"][1]
+
+
+def test_hand_four_passes_instead_of_moving_once_its_single_tile_is_tended():
+    # Hand index 4's zone is a single self-looping tile -- once tended and
+    # watered, there's nowhere to move to, so it must PASS, not crash on a
+    # zero-length DIRECTIONS lookup.
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": True}
+    obs = make_hands_obs(
+        day=0,
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (4, 2)],
+        tiles={(4, 2): tile},
+    )
+    action = wheat_loop_hands_agent(obs)
+    assert action["hands"][4] == ["PASS"]
+
+
+def test_hands_farmer_still_follows_loop_order_12():
+    # Farmer logic is unchanged from wheat_loop_12_agent -- same tile,
+    # same next move.
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": True}
+    obs = make_hands_obs(day=0, farmer=(1, 4), tiles={(1, 4): tile})
+    action = wheat_loop_hands_agent(obs)
+    assert action["farmer"] == ["WEST"]

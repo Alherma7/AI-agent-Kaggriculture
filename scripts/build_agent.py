@@ -5,7 +5,7 @@ from pathlib import Path
 PACKAGE = "kaggriculture_bot"
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 AGENT_DIR = Path(__file__).resolve().parent.parent / "agent" 
-STRATEGY = "kaggriculture_bot.strategies.baseline:wheat_loop_12_agent"
+STRATEGY = "kaggriculture_bot.strategies.baseline:wheat_loop_hands_agent"
 MAIN_HEADER = '''"""Submission entrypoint. Must define `agent(obs)` -> action dict.
 
 GENERATED FILE -- do not edit by hand. Edit the strategy in
