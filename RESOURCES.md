@@ -77,6 +77,78 @@ function's docstring.
   (validated in `notebooks/07_farm_hands.ipynb`, tested in
   `tests/test_baseline.py`).
 
+- **`kaggriculture.py::_apply_unit_action`/turn-processing loop** (engine
+  source, read directly, not assumed -- see `notebooks/08_melon_hand.ipynb`)
+  Why: explains a same-tile `PLANT` race that isn't documented in
+  `README.md`/`AGENTS.md`: each turn, units apply in a fixed order
+  (farmer, then hands by index), and `PLANT` re-checks the tile fresh for
+  each unit -- so if two units share a tile, only the lowest-indexed one
+  actually plants; the rest silently no-op. Separate from `AGENTS.md`'s
+  documented "not enough seed for N simultaneous PLANT requests" rule.
+  Source for the `in_own_zone` fix in
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_melon_agent`
+  (validated in `notebooks/08_melon_hand.ipynb`, tested in
+  `tests/test_baseline.py`): hand 4 (melon) always lost this race against
+  lower-indexed wheat hands on shared `LOOP_ORDER_HANDS` transit tiles, so
+  a hand now only tends a tile that's a key in its own `HAND_ZONES` entry.
+
+- **Kaggriculture leaderboard replay `96612755.json`** (our v4 submission,
+  `wheat_loop_melon_agent` 1-tile melon, vs. `Barathan Aslan`; analyzed
+  2026-08-22, logged in `PROGRESS.md`)
+  Why: showed only one NW tile is never planted the whole game --
+  `(4,3)`, next to the respawn tile -- and that the farmer's own
+  `LOOP_ORDER_12` never once visits it in 720 turns (daily reset to
+  `(4,4)` means the loop rarely finishes a full lap, so its last tiles
+  starve). A pre-existing gap in `LOOP_ORDER_12` (2026-08-19), only
+  exposed once hands stopped opportunistically covering it. Source for
+  `MELON_HAND_ZONES` in
+  `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_melon_agent`
+  (validated in `notebooks/08_melon_hand.ipynb`, tested in
+  `tests/test_baseline.py`): hand 4's zone grew from a single
+  self-looping tile to the 2x2 block `(4,2)-(4,3)-(3,3)-(3,2)`, plugging
+  the gap and quadrupling melon's tile capacity.
+
+- **Kaggriculture leaderboard replay `96612755.json`, revisited** (opponent
+  `Barathan Aslan` action log, analyzed 2026-08-22, logged in
+  `PROGRESS.md`)
+  Why: showed melon isn't a side crop for a real winning opponent — 220
+  units sold for ~$25,594, **81% of their $31,477 final money**, starting
+  exactly day 10 (`MELON`'s `first_yield_day`, a hard floor for both
+  players since the market is shared). Source for
+  `src/kaggriculture_bot/strategies/baseline.py::melon_rush_agent`
+  (validated in `notebooks/09_melon_rush.ipynb`): every unit grows MELON
+  from turn 0 instead of one hand, beats `wheat_loop_melon_agent` 20/20.
+- **`kaggriculture.py::market_price`/`_town_consume`, read directly** (not
+  assumed; a spike run 2026-08-22, logged in `PROGRESS.md`)
+  Why: confirmed MELON's crashed price does *not* recover within a
+  season — no shop buys MELON (only the town center does, draining ~140
+  units over 720 turns, versus the ~150-200 units it takes to crash the
+  price in the first place) — so a "dump then wait then dump again" cycle
+  doesn't work, but a one-way switch away from MELON once its marginal
+  price craters does. Source for
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_agent`
+  (validated in `notebooks/10_melon_then_wheat.ipynb`, tested in
+  `tests/test_baseline.py`): MELON for the first 10 days, WHEAT from day
+  10 onward (a day cutoff instead of a price threshold, since MELON's
+  `first_yield_day=10` already pins the timing precisely) — beats
+  `melon_rush_agent` 20/20.
+
+- **`kaggriculture.py`'s per-unit lockstep market loop, read directly**
+  (not assumed; found 2026-08-22, logged in `PROGRESS.md`)
+  Why: a single `SELL <crop> N` order is processed one unit at a time
+  internally, re-quoting the price after each — so from a single
+  player's own selling alone, dumping a full shed and trickling 1/turn
+  are mathematically identical. But the market is shared, and episode
+  96612755 showed the opponent sells a lot of melon too, so every turn
+  spent holding shed inventory instead of selling is a turn where *their*
+  selling can degrade the price first. Source for the sell-the-whole-shed
+  change to
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_agent`
+  (validated in `notebooks/10_melon_then_wheat.ipynb`, tested in
+  `tests/test_baseline.py`) — reverses the 2026-08-10 sell-1-unit-per-turn
+  choice, which was tested only for WHEAT against non-melon-selling
+  baselines and found inconclusive there.
+
 - **`notebooks/kaggriculture-getting-started.ipynb`** (bovard, official Kaggle
   starter kernel)
   Why: confirms `obs` supports both `.get()` and dotted attribute access;

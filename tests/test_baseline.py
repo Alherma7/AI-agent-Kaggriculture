@@ -14,6 +14,10 @@ from kaggriculture_bot.strategies.baseline import (
     wheat_loop_2x2_agent,
     wheat_loop_12_agent,
     wheat_loop_hands_agent,
+    wheat_loop_melon_agent,
+    MELON_HAND_ZONES,
+    melon_rush_agent,
+    melon_then_wheat_agent,
 )
 
 
@@ -248,7 +252,16 @@ def test_spawn_feeder_routes_each_locked_corner_one_step_toward_the_loop():
 
 
 def make_hands_obs(
-    *, step=5, day=0, seeds=0, shed=0, farmer=(4, 4), hands=(), tiles=None
+    *,
+    step=5,
+    day=0,
+    seeds=0,
+    shed=0,
+    melon_seeds=0,
+    melon_shed=0,
+    farmer=(4, 4),
+    hands=(),
+    tiles=None,
 ):
     """Build a 6x6-tile obs (covers LOOP_ORDER_HANDS + the SE spawn corner)
     with a farmer and a list of hands at given positions."""
@@ -266,7 +279,10 @@ def make_hands_obs(
                 "tiles": board,
             }
         ],
-        "private": {"seeds": {"WHEAT": seeds}, "shed": {"WHEAT": shed}},
+        "private": {
+            "seeds": {"WHEAT": seeds, "MELON": melon_seeds},
+            "shed": {"WHEAT": shed, "MELON": melon_shed},
+        },
     }
 
 
@@ -377,3 +393,328 @@ def test_hands_farmer_still_follows_loop_order_12():
     obs = make_hands_obs(day=0, farmer=(1, 4), tiles={(1, 4): tile})
     action = wheat_loop_hands_agent(obs)
     assert action["farmer"] == ["WEST"]
+
+
+# -- wheat_loop_melon_agent ---------------------------------------------
+#
+# Regression check for the interference bug logged in PROGRESS.md
+# (2026-08-22, notebooks/08_melon_hand.ipynb): the engine applies each
+# turn's PLANT actions in unit order (farmer, then hands by index) and
+# silently drops any PLANT that lands on a tile another unit already
+# claimed that same turn (kaggriculture.py's _apply_unit_action). Since
+# hand 4 (melon) is always last, it lost every such race while hands
+# opportunistically tended any empty tile they passed through on shared
+# LOOP_ORDER_HANDS transit -- so melon seed stock never dropped, ever.
+# Fix: a hand only tends (PLANT/WATER/HARVEST) a tile that's a key in its
+# *own* HAND_ZONES entry; elsewhere it just moves through.
+
+
+def test_melon_hand_buys_melon_seed_when_below_buffer():
+    obs = make_hands_obs(melon_seeds=1)
+    action = wheat_loop_melon_agent(obs)
+    assert ["BUY_SEED", "MELON", 1] in action["market"]
+
+
+def test_melon_hand_does_not_buy_melon_seed_when_stocked():
+    obs = make_hands_obs(step=100, melon_seeds=2)
+    action = wheat_loop_melon_agent(obs)
+    assert not any(
+        order[:2] == ["BUY_SEED", "MELON"] for order in action["market"]
+    )
+
+
+def test_melon_hand_plants_melon_on_its_own_empty_tile():
+    obs = make_hands_obs(
+        melon_seeds=1,
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (4, 2)],
+        tiles={(4, 2): None},
+    )
+    action = wheat_loop_melon_agent(obs)
+    assert action["hands"][4] == ["PLANT", "MELON"]
+
+
+def test_melon_hand_does_not_harvest_at_the_wheat_threshold_age():
+    # crop_age=2 would harvest a WHEAT tile, but hand 4's threshold is 10.
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": True}
+    obs = make_hands_obs(
+        day=2,
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (4, 2)],
+        tiles={(4, 2): tile},
+    )
+    action = wheat_loop_melon_agent(obs)
+    # Already watered and not ready to harvest -> move on to the zone's
+    # next tile, (4,3) (SOUTH), per MELON_HAND_ZONES's 2x2 block.
+    assert action["hands"][4] == ["SOUTH"]
+
+
+def test_melon_hand_harvests_at_its_own_threshold_age():
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": False}
+    obs = make_hands_obs(
+        day=10,
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (4, 2)],
+        tiles={(4, 2): tile},
+    )
+    action = wheat_loop_melon_agent(obs)
+    assert action["hands"][4] == ["HARVEST"]
+
+
+def test_melon_hand_sells_melon_when_in_shed():
+    obs = make_hands_obs(melon_shed=3)
+    action = wheat_loop_melon_agent(obs)
+    assert ["SELL", "MELON", 1] in action["market"]
+
+
+def test_other_hands_still_plant_wheat_on_their_own_zone_tile():
+    obs = make_hands_obs(
+        seeds=1,
+        hands=[(0, 0), (3, 4), (3, 3), (3, 2), (5, 4)],
+        tiles={(0, 0): None},
+    )
+    action = wheat_loop_melon_agent(obs)
+    assert action["hands"][0] == ["PLANT", "WHEAT"]
+
+
+def test_hand_does_not_tend_a_shared_transit_tile_outside_its_own_zone():
+    # (3,4) is a shared LOOP_ORDER_HANDS node but not in HAND_ZONES[0] --
+    # hand 0 must move through it (NORTH, per LOOP_ORDER_HANDS), never
+    # plant there, even though the tile is empty and seed is in stock.
+    obs = make_hands_obs(
+        seeds=1,
+        hands=[(3, 4), (4, 4), (3, 3), (3, 2), (3, 1)],
+        tiles={(3, 4): None},
+    )
+    action = wheat_loop_melon_agent(obs)
+    assert action["hands"][0] == ["NORTH"]
+
+
+def test_melon_hand_does_not_tend_a_shared_transit_tile_either():
+    # Same fix, melon side: hand 4 must not plant on a non-(4,2) tile it's
+    # merely passing through, even with melon seed in stock.
+    obs = make_hands_obs(
+        melon_seeds=1,
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (3, 4)],
+        tiles={(3, 4): None},
+    )
+    action = wheat_loop_melon_agent(obs)
+    assert action["hands"][4] == ["NORTH"]
+
+
+def test_melon_farmer_still_follows_loop_order_12():
+    # Farmer logic is unchanged -- still wheat-only, same as
+    # wheat_loop_hands_agent.
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": True}
+    obs = make_hands_obs(day=0, farmer=(1, 4), tiles={(1, 4): tile})
+    action = wheat_loop_melon_agent(obs)
+    assert action["farmer"] == ["WEST"]
+
+
+# -- MELON_HAND_ZONES[4] expansion (2026-08-22) ---------------------------
+#
+# Regression check for the orphaned-tile bug found in the real Kaggle
+# replay (episode 96612755, logged in PROGRESS.md): the farmer's own
+# LOOP_ORDER_12 never once reached (4,3) in 720 turns (resets to (4,4)
+# daily, rarely finishes a full lap). Fix: hand 4's zone grew from a
+# single self-looping tile to the 2x2 block (4,2)-(4,3)-(3,3)-(3,2).
+
+
+def test_melon_hand_zones_are_pairwise_disjoint():
+    # Only compare each zone's *home* tiles (steady-state), same caveat as
+    # HAND_ZONES: zone 3's (0,1) key is a shared entry point, not a home
+    # tile, and zone 0 legitimately owns (0,1) as a home tile.
+    steady_state = [
+        {(0, 0), (1, 0), (1, 1), (0, 1)},
+        {(2, 0), (3, 0), (3, 1), (2, 1)},
+        {(4, 0), (4, 1)},
+        {(0, 2), (1, 2)},
+        {(4, 2), (4, 3), (3, 3), (3, 2)},
+    ]
+    for i, a in enumerate(steady_state):
+        for j, b in enumerate(steady_state):
+            if i < j:
+                assert not (a & b)
+
+
+def test_melon_hand_zone_four_is_a_closed_adjacent_cycle():
+    zone4 = MELON_HAND_ZONES[4]
+    assert len(zone4) == 4
+    assert_is_closed_adjacent_cycle(zone4)
+
+
+def test_melon_hand_tends_the_new_zone_tiles_not_just_the_original_one():
+    # Hands 0-3 parked off to the side (irrelevant to this check) so their
+    # positions never collide with hand 4's tile under test.
+    for tile_pos in [(4, 3), (3, 3), (3, 2)]:
+        obs = make_hands_obs(
+            melon_seeds=1,
+            hands=[(5, 4), (5, 4), (5, 4), (5, 4), tile_pos],
+            tiles={tile_pos: None},
+        )
+        action = wheat_loop_melon_agent(obs)
+        assert action["hands"][4] == ["PLANT", "MELON"], tile_pos
+
+
+# -- melon_rush_agent -------------------------------------------------------
+#
+# All-in melon experiment (PROGRESS.md, 2026-08-22): every unit grows MELON,
+# reusing wheat_loop_hands_agent's structure (LOOP_ORDER_12 / HAND_ZONES)
+# with WHEAT -> MELON and threshold 2 -> 10 everywhere.
+
+
+def test_rush_hires_while_under_five():
+    obs = make_hands_obs(hands=[(4, 4), (3, 4)])
+    action = melon_rush_agent(obs)
+    assert ["HIRE"] in action["market"]
+
+
+def test_rush_buys_melon_seed_in_batch_up_to_six():
+    obs = make_hands_obs(melon_seeds=2)
+    action = melon_rush_agent(obs)
+    assert ["BUY_SEED", "MELON", 4] in action["market"]
+
+
+def test_rush_does_not_buy_seed_when_stocked_past_six():
+    obs = make_hands_obs(step=100, melon_seeds=6)
+    action = melon_rush_agent(obs)
+    assert not any(order[0] == "BUY_SEED" for order in action["market"])
+
+
+def test_rush_hand_plants_melon_on_its_own_empty_tile():
+    obs = make_hands_obs(melon_seeds=1, hands=[(0, 0)], tiles={(0, 0): None})
+    action = melon_rush_agent(obs)
+    assert action["hands"] == [["PLANT", "MELON"]]
+
+
+def test_rush_hand_does_not_harvest_at_the_wheat_threshold_age():
+    # crop_age=2 would harvest a WHEAT tile everywhere else in this file,
+    # but melon_rush_agent's threshold is 10 for every hand.
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": True}
+    obs = make_hands_obs(day=2, hands=[(0, 0)], tiles={(0, 0): tile})
+    action = melon_rush_agent(obs)
+    assert action["hands"] == [["EAST"]]  # zone move, not HARVEST
+
+
+def test_rush_hand_harvests_at_the_melon_threshold_age():
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": False}
+    obs = make_hands_obs(day=10, hands=[(0, 0)], tiles={(0, 0): tile})
+    action = melon_rush_agent(obs)
+    assert action["hands"] == [["HARVEST"]]
+
+
+def test_rush_hand_does_not_tend_a_shared_transit_tile_outside_its_own_zone():
+    obs = make_hands_obs(
+        melon_seeds=1,
+        hands=[(3, 4)],
+        tiles={(3, 4): None},
+    )
+    action = melon_rush_agent(obs)
+    assert action["hands"] == [["NORTH"]]
+
+
+def test_rush_sells_melon_when_in_shed():
+    obs = make_hands_obs(melon_shed=3)
+    action = melon_rush_agent(obs)
+    assert ["SELL", "MELON", 1] in action["market"]
+
+
+def test_rush_does_not_sell_wheat_ever():
+    obs = make_hands_obs(shed=5)  # WHEAT in shed, should be irrelevant
+    action = melon_rush_agent(obs)
+    assert not any(order[:2] == ["SELL", "WHEAT"] for order in action["market"])
+
+
+def test_rush_farmer_plants_melon_not_wheat():
+    obs = make_hands_obs(melon_seeds=1, farmer=(4, 4), tiles={(4, 4): None})
+    action = melon_rush_agent(obs)
+    assert action["farmer"] == ["PLANT", "MELON"]
+
+
+def test_rush_farmer_harvests_at_the_melon_threshold_age():
+    tile = {"kind": "PLANT", "planted_day": 0, "watered_today": False}
+    obs = make_hands_obs(day=10, farmer=(1, 4), tiles={(1, 4): tile})
+    action = melon_rush_agent(obs)
+    assert action["farmer"] == ["HARVEST"]
+
+
+# -- melon_then_wheat_agent ---------------------------------------------
+#
+# One-way day-based crop switch (PROGRESS.md, 2026-08-22): MELON for the
+# first 10 days, WHEAT from day 10 onward. Harvest threshold always comes
+# from the tile's own crop, not the current phase, since MELON planted
+# before the switch keeps growing after it.
+
+
+def test_switch_hand_plants_melon_before_day_10():
+    obs = make_hands_obs(day=5, melon_seeds=1, hands=[(0, 0)], tiles={(0, 0): None})
+    action = melon_then_wheat_agent(obs)
+    assert action["hands"] == [["PLANT", "MELON"]]
+
+
+def test_switch_hand_plants_wheat_from_day_10():
+    obs = make_hands_obs(day=10, seeds=1, hands=[(0, 0)], tiles={(0, 0): None})
+    action = melon_then_wheat_agent(obs)
+    assert action["hands"] == [["PLANT", "WHEAT"]]
+
+
+def test_switch_buys_melon_seed_before_day_10():
+    obs = make_hands_obs(day=5, melon_seeds=2)
+    action = melon_then_wheat_agent(obs)
+    assert ["BUY_SEED", "MELON", 4] in action["market"]
+
+
+def test_switch_buys_wheat_seed_from_day_10():
+    obs = make_hands_obs(day=10, seeds=2)
+    action = melon_then_wheat_agent(obs)
+    assert ["BUY_SEED", "WHEAT", 4] in action["market"]
+
+
+def test_switch_does_not_buy_melon_seed_once_in_wheat_phase():
+    obs = make_hands_obs(step=100, day=10, melon_seeds=0)
+    action = melon_then_wheat_agent(obs)
+    assert not any(order[:2] == ["BUY_SEED", "MELON"] for order in action["market"])
+
+
+def test_switch_harvest_threshold_uses_the_tiles_own_crop_not_the_phase():
+    # A MELON planted on day 8 (before the switch) is still growing on
+    # day 12 (after it) -- must wait for its own day 18, not jump to the
+    # WHEAT-phase threshold of 2. crop_age=4 < 10 and already watered ->
+    # move to the zone's next tile (EAST from (0,0), per HAND_ZONES[0]).
+    tile = {"kind": "PLANT", "crop": "MELON", "planted_day": 8, "watered_today": True}
+    obs = make_hands_obs(day=12, hands=[(0, 0)], tiles={(0, 0): tile})
+    action = melon_then_wheat_agent(obs)
+    assert action["hands"] == [["EAST"]]
+
+
+def test_switch_harvests_a_wheat_tile_at_its_own_threshold_after_the_switch():
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 10, "watered_today": False}
+    obs = make_hands_obs(day=12, hands=[(0, 0)], tiles={(0, 0): tile})
+    action = melon_then_wheat_agent(obs)
+    assert action["hands"] == [["HARVEST"]]
+
+
+def test_switch_sells_the_full_melon_shed_not_one_unit_at_a_time():
+    # Dumping the whole shed at once beats 1/turn when the market is
+    # shared with an opponent also selling melon (PROGRESS.md, 2026-08-22)
+    # -- every unit sells at the same price either way (checked directly
+    # in the engine's per-unit lockstep market loop), but trickling gives
+    # the opponent's own sales more turns to degrade the price first.
+    obs = make_hands_obs(day=15, melon_shed=3)
+    action = melon_then_wheat_agent(obs)
+    assert ["SELL", "MELON", 3] in action["market"]
+
+
+def test_switch_sells_the_full_wheat_shed_not_one_unit_at_a_time():
+    obs = make_hands_obs(day=15, shed=2)
+    action = melon_then_wheat_agent(obs)
+    assert ["SELL", "WHEAT", 2] in action["market"]
+
+
+def test_switch_farmer_plants_melon_before_day_10():
+    obs = make_hands_obs(day=5, melon_seeds=1, farmer=(4, 4), tiles={(4, 4): None})
+    action = melon_then_wheat_agent(obs)
+    assert action["farmer"] == ["PLANT", "MELON"]
+
+
+def test_switch_farmer_plants_wheat_from_day_10():
+    obs = make_hands_obs(day=10, seeds=1, farmer=(4, 4), tiles={(4, 4): None})
+    action = melon_then_wheat_agent(obs)
+    assert action["farmer"] == ["PLANT", "WHEAT"]

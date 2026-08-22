@@ -290,6 +290,205 @@ real state of `src/` and `agent/main.py`.
     single-tile zone's `PASS` fallback). `RESOURCES.md` updated.
   - Regenerated `agent/main.py` via `scripts/build_agent.py` (`STRATEGY`
     unchanged, still `wheat_loop_hands_agent` — only its body changed).
+- 2026-08-22 — `notebooks/08_melon_hand.ipynb`: first increment on the
+  "Per-tile crop choice by ROI" roadmap item — deliberately not the ROI
+  logic itself (needs melon's sell-price behavior, not yet explored),
+  just proving the multi-crop mechanism works. One fixed hand (index 4,
+  the single-tile `(4,2)` zone in `HAND_ZONES`) grows `MELON` instead of
+  `WHEAT`; farmer and hands 0-3 unchanged.
+  - Read `CROPS` off the installed `kaggle_environments` package (not
+    transcribed): `MELON` costs $80/seed vs. $10 for `WHEAT`, isn't
+    `ongoing` (one harvest per planting), and `first_yield_day` is 10 vs.
+    2 — so the harvest threshold had to branch per hand instead of the
+    hardcoded `crop_age >= 2` every prior agent used.
+  - **Bug found via instrumented episode, not assumed**: the first working
+    draft printed nothing when logging `tile(4,2)`'s state over a full
+    episode — `melon_seeds` never dropped below 2 across 3 full days, and
+    hands 0/2/4 stayed permanently glued to one shared tile all day.
+    Root cause, confirmed by reading the installed engine source
+    (`kaggriculture.py::_apply_unit_action`): each turn's `PLANT` actions
+    apply in a fixed unit order (farmer, then hands by index), and a
+    `PLANT` silently no-ops if the tile is no longer empty by the time
+    that unit's turn comes — so on any tile shared with a lower-indexed
+    hand, hand 4 (melon) lost the plant race every single time. This is
+    separate from `AGENTS.md`'s documented "not enough seed for N
+    simultaneous PLANT requests" rule. Every hand (0-3 too) previously
+    tended *any* empty tile it merely passed through on the shared
+    `LOOP_ORDER_HANDS` transit path — harmless when every hand wants the
+    same crop, not once one hand wants something different.
+  - Fix: `in_own_zone` check — a hand now only tends
+    (`PLANT`/`WATER`/`HARVEST`) a tile that's a key in its own
+    `HAND_ZONES` entry; elsewhere it just moves through. This also
+    removes hands 0-3's previous opportunistic tending of shared transit
+    tiles, so the validation below compares two changes at once (melon
+    hand + zone-restricted tending) rather than isolating attribution,
+    consistent with this project's "compare against current best as a
+    whole" convention. `RESOURCES.md` updated with the engine-source
+    finding.
+  - Validated against the current best,
+    `evaluate(wheat_loop_hands_agent, wheat_loop_melon_agent, n=20)` →
+    `win_rate=0.0` for `wheat_loop_hands_agent` across two independent
+    calls (`avg_money` 5857.0 and 6488.0 for the losing baseline).
+    Graduated to
+    `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_melon_agent`,
+    11 new unit tests in `tests/test_baseline.py` (melon seed buy/no-buy,
+    plant/harvest at melon's own threshold vs. wheat's, sell, and two
+    regression tests for the `in_own_zone` fix — a wheat hand and the
+    melon hand both refusing to tend a shared transit tile outside their
+    own zone).
+  - Regenerated `agent/main.py` via `scripts/build_agent.py` (switched
+    `STRATEGY` to `wheat_loop_melon_agent`), validated standalone against
+    `wheat_loop_hands_agent` the same way as the 2026-08-19/2026-08-21
+    entries: `win_rate=0.0`, `avg_money=6136.0` — confirms the generated
+    file behaves identically to the graduated `src/` version. **Not yet
+    submitted to Kaggle.**
+- 2026-08-22 — Submitted v4 (`agent/main.py`, `wheat_loop_melon_agent`,
+  1-tile melon hand) to Kaggle. Lost to `Barathan Aslan`, 6698 vs 31477
+  (episode 96612755, saved to `replays/`). Analyzed the same way as prior
+  submissions:
+  - Confirms the 1-tile melon design worked exactly as built: only 3
+    `PLANT MELON` orders across the whole game (vs. 194 `PLANT WHEAT`) —
+    one tile, one ~10-day cycle, ~3 harvests possible in a 30-day season.
+  - **New finding**: of the 25 NW tiles, exactly one is never planted the
+    entire game — `(4,3)`, right next to the respawn tile `(4,4)`.
+    Tracking the farmer's own position turn by turn (not assumed) showed
+    it never visits `(4,3)` even once in 720 turns: early `LOOP_ORDER_12`
+    tiles get visited on almost every one of the 30 days (~89 times
+    each), but the count drops off fast toward the loop's end — `(3,3)`
+    only 2 times, `(4,3)` zero. Root cause: the farmer resets to `(4,4)`
+    every day (game rule) and a full 12-tile lap plus harvest/water
+    rarely fits in the ~24-turn day budget, so the last tiles before
+    wrapping around are systematically starved. This is a gap in
+    `LOOP_ORDER_12` itself, present since 2026-08-19 — it was hidden
+    until now because hands used to opportunistically tend `(3,3)`/`(4,3)`
+    while passing through on shared `LOOP_ORDER_HANDS` transit (both are
+    nodes in that graph too); the `in_own_zone` fix logged above removed
+    that accidental coverage and exposed the real gap.
+  - Fix (`notebooks/08_melon_hand.ipynb`, same day): `MELON_HAND_ZONES`,
+    a new constant (not a `HAND_ZONES` mutation — `wheat_loop_hands_agent`
+    stays untouched, same reasoning as keeping `LOOP_ORDER_2X2` separate
+    from `LOOP_ORDER_12`). Hand 4's zone grows from a single self-looping
+    tile to the closed 2x2 block `(4,2)-(4,3)-(3,3)-(3,2)`, plugging the
+    farmer-loop gap as a real own-zone tile and quadrupling melon's tile
+    capacity in the same change. `RESOURCES.md` updated.
+  - Validated against the current best (`wheat_loop_melon_agent`, 1-tile):
+    `win_rate=0.0` across two independent `evaluate()` calls (`avg_money`
+    8350.0 and 8553.0 for the losing, 1-tile side). Graduated in place
+    into `src/kaggriculture_bot/strategies/baseline.py::wheat_loop_melon_agent`
+    (same function name, now built on `MELON_HAND_ZONES`), 3 new unit
+    tests in `tests/test_baseline.py` (zone disjointness/cycle validity,
+    tending all 4 zone tiles not just the original one) plus one existing
+    test updated (hand 4 now moves within its zone instead of `PASS`ing
+    on a single tile). Regenerated `agent/main.py` (`STRATEGY` unchanged).
+    **Not yet submitted to Kaggle.**
+- 2026-08-22 — Revisited the episode 96612755 replay (opponent
+  `Barathan Aslan`, our v4 submission) to check the opponent's own
+  `PLANT`/`SELL` actions, not just ours: they planted `MELON` 45 times
+  and sold 220 units for **~$25,594 — 81% of their $31,477 final money**
+  (first sale day 10, 12 units at full $250 base price). Melon isn't a
+  side crop for this opponent, it's the majority of their win. Our own
+  4-tile melon hand is far too small to compete at that scale.
+  - `notebooks/09_melon_rush.ipynb`: tested the other extreme —
+    `melon_rush_agent`, every unit (farmer + up to 5 hands) grows MELON
+    exclusively, reusing `wheat_loop_hands_agent`'s structure with
+    `WHEAT` -> `MELON` and threshold `2` -> `10` everywhere (not just one
+    hand). Beats `wheat_loop_melon_agent` 20/20 across two independent
+    `evaluate()` calls (`avg_money` 16219.0 and 15216.0 for the losing
+    side). Real risk confirmed via an instrumented episode, not assumed:
+    money drops to **$68** by day 11 (no income before day 10) before
+    exploding to $17,068 by day 14 as the first melon harvests sell.
+    Graduated to
+    `src/kaggriculture_bot/strategies/baseline.py::melon_rush_agent`, 10
+    new unit tests in `tests/test_baseline.py`. `RESOURCES.md` updated.
+  - Spike (same day, before designing further): read `market_price`/
+    `_town_consume` directly from the installed engine rather than
+    simulate a full episode. Confirmed MELON's price does **not**
+    recover within a season once crashed — no shop buys MELON (only
+    `TOWN_CENTER_PRODUCTS`, draining ~140 units over 720 turns), while
+    the price already hits the $1 floor around 150-200 cumulative units
+    sold. Simulated selling sequentially: 24 units nets $5,958 (avg
+    $248/unit), 100 units nets $21,721 (avg $217/unit), 200 units only
+    $26,527 total (avg $133/unit, floor hit at unit #158) — so a
+    "dump-wait-dump again" cycle doesn't work, but permanently switching
+    new plantings away from MELON once it's no longer worth it does.
+  - `notebooks/10_melon_then_wheat.ipynb`: `melon_then_wheat_agent` —
+    MELON for the first 10 days (matches `first_yield_day`, a hard floor
+    for everyone), WHEAT from day 10 onward, applied uniformly to every
+    unit. Harvest threshold reads each tile's own `crop` field rather
+    than the current phase, so MELON planted before the switch still
+    matures on its own schedule; seed purchases and shed sales are
+    tracked for both crops independently, so nothing goes to waste and
+    nothing gets missed during the transition. Beats `melon_rush_agent`
+    20/20 across two independent `evaluate()` calls (`avg_money` 16711.0
+    both times — confirmed as two genuinely separate runs, not a
+    duplicated paste). Graduated to
+    `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_agent`,
+    12 new unit tests in `tests/test_baseline.py` (crop/seed/threshold/sell
+    switching correctly by day, and the tile-crop-not-phase harvest
+    regression). `RESOURCES.md` updated.
+  - **Extended same day**: noticed the agent still sells 1 unit/turn
+    (inherited from `wheat_loop_agent`'s 2026-08-10 convention). Read the
+    engine's per-unit lockstep market loop directly: a `SELL <crop> N`
+    order is processed one unit at a time internally regardless of N, so
+    from a single player's own selling alone, dumping the full shed and
+    trickling 1/turn give identical revenue — but since the market is
+    shared and episode 96612755 showed the opponent sells a lot of melon
+    too, every turn spent holding inventory is a turn where *their*
+    selling can degrade price first. Switched both `SELL WHEAT`/
+    `SELL MELON` to dump the full shed amount instead of 1. Re-validated
+    against the then-current best (this same agent, 1-unit-per-turn):
+    `win_rate=0.0` across two independent `evaluate()` calls (`avg_money`
+    13514.0 and 13751.0 for the losing side). Graduated in place (same
+    function name), 2 existing tests updated to expect the full shed
+    amount instead of 1. `RESOURCES.md` updated. Regenerated
+    `agent/main.py` (`STRATEGY` unchanged, only the body changed).
+    **Not yet submitted to Kaggle.**
+- 2026-08-22 — `notebooks/11_buy_land_ne.ipynb`: explored `BUY_LAND` (no
+  hard cap on hands in the engine either -- `_do_hire` only checks
+  affordability, confirmed reading `kaggriculture.py` directly -- filed
+  as a separate idea below). Bought NE (`LAND_ORDER = ["NE","SW","SE"]`,
+  `LAND_PRICES = [1000,2000,4000]`) once `crop_to_plant == "WHEAT" and
+  money >= 1000` (gating on the phase, not just the raw threshold --
+  starting money is already $3000, so a bare `money >= 1000` check would
+  fire on turn 0), then relocated hands 3 and 4 from their small NW
+  zones to a freshly-designed NE loop/zones (not a coordinate mirror of
+  `LOOP_ORDER_HANDS` -- that broke, see below).
+  - **Bug found and fixed**: first attempt mirrored `LOOP_ORDER_HANDS`
+    into NE by shifting `x + 5`. Crashed with `KeyError: (5, 4)`.
+    Root cause: `LOOP_ORDER_HANDS` only covers tiles the *hands* need,
+    deliberately excluding what the farmer's own `LOOP_ORDER_12` already
+    covers in NW -- its "entry" key `(4,4)` is NW's innermost corner,
+    which shifts to `(9,4)`, NE's *farthest* corner, not the near one;
+    `(5,4)` (NE's real near corner) was never a key in the shifted dict
+    at all. Fixed by designing NE's loop directly instead of mirroring:
+    a 16-tile loop around the NE block's border, entering at `(5,4)`,
+    with hands 3/4 peeling into their own private 2x2 zones
+    (`ZONE_3_NE`/`ZONE_4_NE`) -- verified directly (closed-cycle checks,
+    disjointness, reachability from all 4 spawn corners), not just by
+    construction. Also added a merged NW+NE fallback for the one-turn
+    edge case where NE unlocks mid-day while a hand is still physically
+    in NW territory.
+  - **Result: lost 20/20** to `melon_then_wheat_agent` (`win_rate=1.0`
+    for the baseline). Diagnosed with a real replay-diff, not guessed:
+    replaying the land-agent's actual observations through the baseline
+    function turn by turn found **zero divergence** in the melon phase
+    (days 0-9) -- confirms no code bug, the loss is economic. Money
+    trajectory from an instrumented episode: gap is $1160 right after
+    buying NE (day 12) but narrows to just $141 by day 29 -- NE's wheat
+    *is* profitable, but land is only affordable this late (~day 12,
+    once melon money arrives) and doesn't have enough of the ~18
+    remaining days to fully repay the $1000 outlay from just 2 hands'
+    worth of low-value WHEAT before the season ends.
+  - **Follow-up idea, not yet built**: since hiring has no hard cap,
+    hire 2 *extra* hands (indices 5/6) dedicated to NE instead of
+    relocating hands 3/4 away from NW -- NW keeps its current coverage
+    entirely, NE becomes pure upside minus the incremental Fibonacci
+    hiring cost (cheap: hands 6/7 cost 8+13=21/day extra, vs. the $1000
+    land cost itself). Paused here for the day; `melon_then_wheat_agent`
+    (without land) is the version being submitted next, not the land
+    variant. Geometry (`LOOP_ORDER_HANDS_NE`/`ZONE_3_NE`/`ZONE_4_NE`/
+    `SPAWN_FEEDER_NE`) is already built and validated in the notebook,
+    reusable for the extra-hands version.
 
 ## Next steps
 
@@ -366,8 +565,46 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       (2026-08-21 log entries): hands were permanently merging onto one
       tile; fixed with `HAND_ZONES` (per-hand disjoint private loops) —
       beats the un-zoned version decisively, 20/20 across three runs.
+- [x] **Per-tile crop choice (first increment)** — one fixed hand (index
+      4) grows MELON instead of WHEAT, no ROI comparison yet, graduated
+      as `wheat_loop_melon_agent` (see 2026-08-22 log entry). Beats
+      `wheat_loop_hands_agent` decisively, 20/20 across two runs. Wired
+      into `agent/main.py`, submitted as v4 — lost to `Barathan Aslan`
+      (episode 96612755), replay analysis revealed and fixed a real gap
+      in `LOOP_ORDER_12` (see next bullet).
+- [x] **Per-tile crop choice (second increment)** — extended hand 4 from
+      a single melon tile to a 2x2 zone (`MELON_HAND_ZONES`), which also
+      plugs the `(4,3)` farmer-loop gap found in the v4 replay. Beats the
+      1-tile version decisively, 20/20 across two runs. Regenerated
+      `agent/main.py`, not yet submitted to Kaggle.
+- [x] **Melon rush (third increment)** — every unit grows MELON from turn
+      0 instead of one hand, motivated by a real opponent replay showing
+      melon as 81% of their winning money. Graduated as `melon_rush_agent`
+      (see 2026-08-22 log entry). Beats `wheat_loop_melon_agent`
+      decisively, 20/20 across two runs.
+- [x] **Melon then wheat (fourth increment)** — one-way day-based switch
+      (MELON days 0-9, WHEAT from day 10) instead of pure rush, since a
+      spike confirmed MELON's crashed price never recovers within a
+      season. Graduated as `melon_then_wheat_agent` (see 2026-08-22 log
+      entry). Beats `melon_rush_agent` decisively, 20/20 across two runs.
+      Extended same day: sell the full shed at once instead of 1/turn
+      (matters against a shared market with a melon-selling opponent).
+      Wired into `agent/main.py`, not yet submitted to Kaggle.
+- [ ] **Buy land (NE), paused mid-exploration** — bought NE once
+      affordable and relocated hands 3/4 there for WHEAT; geometry works
+      (see 2026-08-22 log entry) but lost 20/20 to `melon_then_wheat_agent`
+      — economic, not a bug (confirmed via replay-diff): land is only
+      affordable ~day 12, leaving too few days to repay the $1000 cost
+      from 2 hands' WHEAT. Follow-up idea queued: hire 2 *extra* hands
+      (no hard cap on hires in the engine) dedicated to NE instead of
+      relocating hands away from NW, so NW coverage never drops. Not yet
+      built. `melon_then_wheat_agent` (no land) remains `agent/main.py`'s
+      `STRATEGY` for now.
 - [ ] Per-tile crop choice by ROI (the Yield/tile/day column in README.md)
-      — diversify beyond wheat-only (HechtJP also grew CARROT/MELON)
+      — actually compare $/tile/day across crops (needs melon's — and
+      other crops' — sell-price behavior, not yet explored) instead of a
+      fixed hand-to-crop assignment; extend beyond MELON to
+      CARROT/TOMATO/STRAWBERRY
 - [ ] Price-aware selling (avoid crashing premium goods to the $1 floor by
       dumping full inventory at once)
 - [ ] Animals: coop/pasture, feed, care, fertilizer loop
