@@ -18,6 +18,12 @@ from kaggriculture_bot.strategies.baseline import (
     MELON_HAND_ZONES,
     melon_rush_agent,
     melon_then_wheat_agent,
+    LOOP_ORDER_HANDS_NE,
+    SPAWN_FEEDER_NE,
+    ZONE_TOP_NE,
+    ZONE_LEFT_NE,
+    ZONE_RIGHT_NE,
+    melon_then_wheat_extra_hands_agent,
 )
 
 
@@ -262,6 +268,8 @@ def make_hands_obs(
     farmer=(4, 4),
     hands=(),
     tiles=None,
+    money=3000,
+    unlocked_quadrants=("NW",),
 ):
     """Build a 6x6-tile obs (covers LOOP_ORDER_HANDS + the SE spawn corner)
     with a farmer and a list of hands at given positions."""
@@ -277,6 +285,8 @@ def make_hands_obs(
                 "farmer": list(farmer),
                 "hands": [list(h) for h in hands],
                 "tiles": board,
+                "money": money,
+                "unlocked_quadrants": list(unlocked_quadrants),
             }
         ],
         "private": {
@@ -718,3 +728,219 @@ def test_switch_farmer_plants_wheat_from_day_10():
     obs = make_hands_obs(day=10, seeds=1, farmer=(4, 4), tiles={(4, 4): None})
     action = melon_then_wheat_agent(obs)
     assert action["farmer"] == ["PLANT", "WHEAT"]
+
+
+# -- melon_then_wheat_extra_hands_agent ----------------------------------
+#
+# Extends melon_then_wheat_agent with 2 extra hands (indices 5, 6)
+# dedicated to NE, hired only once NE is bought (PROGRESS.md, 2026-08-23;
+# notebooks/12_buy_land_extra_hands.ipynb). NW (hands 0-4) is unchanged.
+
+
+def make_ne_obs(
+    *,
+    step=5,
+    day=0,
+    seeds=0,
+    shed=0,
+    melon_seeds=0,
+    melon_shed=0,
+    farmer=(4, 4),
+    hands=(),
+    tiles=None,
+    money=3000,
+    unlocked_quadrants=("NW",),
+):
+    """Same shape as make_hands_obs, but a 10x10 board -- large enough to
+    also cover NE (x=5..9, y=0..4)."""
+    board = [[None] * 10 for _ in range(10)]
+    for (x, y), tile in (tiles or {}).items():
+        board[y][x] = tile
+    return {
+        "player": 0,
+        "step": step,
+        "day": day,
+        "farms": [
+            {
+                "farmer": list(farmer),
+                "hands": [list(h) for h in hands],
+                "tiles": board,
+                "money": money,
+                "unlocked_quadrants": list(unlocked_quadrants),
+            }
+        ],
+        "private": {
+            "seeds": {"WHEAT": seeds, "MELON": melon_seeds},
+            "shed": {"WHEAT": shed, "MELON": melon_shed},
+        },
+    }
+
+
+def test_loop_order_hands_ne_is_a_single_closed_cycle_of_adjacent_tiles():
+    assert len(LOOP_ORDER_HANDS_NE) == 16
+    assert_is_closed_adjacent_cycle(LOOP_ORDER_HANDS_NE)
+
+
+def test_zone_top_ne_is_a_single_closed_cycle_of_adjacent_tiles():
+    assert len(ZONE_TOP_NE) == 10
+    assert_is_closed_adjacent_cycle(ZONE_TOP_NE)
+
+
+def test_zone_left_ne_is_a_single_closed_cycle_of_adjacent_tiles():
+    assert len(ZONE_LEFT_NE) == 6
+    assert_is_closed_adjacent_cycle(ZONE_LEFT_NE)
+
+
+def test_zone_right_ne_is_a_single_closed_cycle_of_adjacent_tiles():
+    # 15 tiles in the y=2-4 block minus (8,3), split into ZONE_LEFT_NE (6)
+    # and ZONE_RIGHT_NE (8) -- a single closed loop can't visit all 15 in
+    # one piece (grid adjacency is bipartite, so a cycle needs an even
+    # tile count), and this split also keeps each hand under the
+    # ~12-tiles/day ceiling wheat_loop_12_agent was sized against.
+    assert len(ZONE_RIGHT_NE) == 8
+    assert (8, 3) not in ZONE_RIGHT_NE
+    assert_is_closed_adjacent_cycle(ZONE_RIGHT_NE)
+
+
+def test_ne_zones_are_pairwise_disjoint():
+    zones = [ZONE_TOP_NE, ZONE_LEFT_NE, ZONE_RIGHT_NE]
+    for i, a in enumerate(zones):
+        for j, b in enumerate(zones):
+            if i < j:
+                assert not (set(a) & set(b))
+
+
+def test_spawn_feeder_ne_routes_each_corner_toward_the_loop_entry():
+    for pos, nxt in SPAWN_FEEDER_NE.items():
+        assert abs(nxt[0] - pos[0]) + abs(nxt[1] - pos[1]) == 1
+        assert nxt == (5, 4) or nxt in SPAWN_FEEDER_NE
+
+
+def test_extra_hands_hires_while_under_five_regardless_of_quadrants():
+    obs = make_ne_obs(hands=[(4, 4), (3, 4)], unlocked_quadrants=("NW",))
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["HIRE"] in action["market"]
+
+
+def test_extra_hands_does_not_hire_past_five_before_ne_unlocked():
+    obs = make_ne_obs(
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (4, 2)],
+        unlocked_quadrants=("NW",),
+    )
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["HIRE"] not in action["market"]
+
+
+def test_extra_hands_hires_up_to_eight_once_ne_unlocked():
+    obs = make_ne_obs(
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (4, 2)],
+        unlocked_quadrants=("NW", "NE"),
+    )
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["HIRE"] in action["market"]
+
+
+def test_extra_hands_does_not_hire_past_eight_even_with_ne_unlocked():
+    obs = make_ne_obs(
+        hands=[(4, 4), (3, 4), (3, 3), (3, 2), (4, 2), (5, 4), (5, 0), (7, 2)],
+        unlocked_quadrants=("NW", "NE"),
+    )
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["HIRE"] not in action["market"]
+
+
+def test_extra_hands_buys_seed_in_batch_up_to_nine():
+    # Up to 9 units can now want to plant at once (farmer + up to 8 hands),
+    # vs. the 6 melon_then_wheat_agent's seed buffer was tuned for.
+    obs = make_ne_obs(day=10, seeds=2)
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["BUY_SEED", "WHEAT", 7] in action["market"]
+
+
+def test_extra_hands_buys_land_once_affordable_in_wheat_phase():
+    obs = make_ne_obs(day=10, money=1000, unlocked_quadrants=("NW",))
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["BUY_LAND"] in action["market"]
+
+
+def test_extra_hands_does_not_buy_land_before_wheat_phase_even_if_affordable():
+    # Regression check: starting money ($3000) already clears the $1000
+    # threshold on turn 0, day 0 (melon phase) -- BUY_LAND must wait for
+    # crop_to_plant == "WHEAT" (day >= 10), not fire immediately.
+    obs = make_ne_obs(day=5, money=3000, unlocked_quadrants=("NW",))
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["BUY_LAND"] not in action["market"]
+
+
+def test_extra_hands_does_not_buy_land_once_already_unlocked():
+    obs = make_ne_obs(day=10, money=5000, unlocked_quadrants=("NW", "NE"))
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert ["BUY_LAND"] not in action["market"]
+
+
+def test_hand_five_plants_wheat_on_its_own_ne_zone_tile():
+    # (6,1) is only a ZONE_TOP_NE tile (not in ZONE_LEFT_NE, ZONE_RIGHT_NE,
+    # or the shared LOOP_ORDER_HANDS_NE ring) -- a regression check that
+    # hand 5 really uses ZONE_TOP_NE (own_zone assignment bug).
+    obs = make_ne_obs(
+        day=10,
+        seeds=1,
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), (3, 4), (6, 1)],
+        tiles={(6, 1): None},
+        unlocked_quadrants=("NW", "NE"),
+    )
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert action["hands"][5] == ["PLANT", "WHEAT"]
+
+
+def test_hand_six_plants_wheat_on_its_own_ne_zone_tile():
+    # (6,3) is only a ZONE_LEFT_NE tile (interior, not in ZONE_TOP_NE,
+    # ZONE_RIGHT_NE, or the shared ring) -- same regression check, hand 6.
+    obs = make_ne_obs(
+        day=10,
+        seeds=1,
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), (3, 4), (5, 0), (6, 3)],
+        tiles={(6, 3): None},
+        unlocked_quadrants=("NW", "NE"),
+    )
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert action["hands"][6] == ["PLANT", "WHEAT"]
+
+
+def test_hand_seven_plants_wheat_on_its_own_ne_zone_tile():
+    # (8,2) is only a ZONE_RIGHT_NE tile (not in ZONE_TOP_NE, ZONE_LEFT_NE,
+    # or the shared ring) -- same regression check, for hand 7.
+    obs = make_ne_obs(
+        day=10,
+        seeds=1,
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), (3, 4), (5, 0), (5, 2), (8, 2)],
+        tiles={(8, 2): None},
+        unlocked_quadrants=("NW", "NE"),
+    )
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert action["hands"][7] == ["PLANT", "WHEAT"]
+
+
+def test_hand_five_does_not_tend_a_shared_ring_tile_outside_its_own_zone():
+    # (9,4) is a LOOP_ORDER_HANDS_NE ring tile and a ZONE_RIGHT_NE tile,
+    # but not in ZONE_TOP_NE -- hand 5 must move through it (NORTH, per
+    # LOOP_ORDER_HANDS_NE), never plant there, even with seed in stock.
+    obs = make_ne_obs(
+        day=10,
+        seeds=1,
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), (3, 4), (9, 4)],
+        tiles={(9, 4): None},
+        unlocked_quadrants=("NW", "NE"),
+    )
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert action["hands"][5] == ["NORTH"]
+
+
+def test_extra_hands_farmer_still_follows_loop_order_12():
+    # Farmer logic is unchanged from melon_then_wheat_agent -- NE is hands
+    # 5/6/7 only. crop_age=0 < threshold and already watered -> move on to
+    # the next LOOP_ORDER_12 tile, (0,4), a WEST move.
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": True}
+    obs = make_ne_obs(day=0, farmer=(1, 4), tiles={(1, 4): tile})
+    action = melon_then_wheat_extra_hands_agent(obs)
+    assert action["farmer"] == ["WEST"]

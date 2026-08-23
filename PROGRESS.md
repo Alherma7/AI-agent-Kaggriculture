@@ -489,6 +489,82 @@ real state of `src/` and `agent/main.py`.
     variant. Geometry (`LOOP_ORDER_HANDS_NE`/`ZONE_3_NE`/`ZONE_4_NE`/
     `SPAWN_FEEDER_NE`) is already built and validated in the notebook,
     reusable for the extra-hands version.
+- 2026-08-23 — `notebooks/12_buy_land_extra_hands.ipynb`: built the
+  follow-up idea queued in the entry above — hire 2 *extra* hands
+  (indices 5, 6) dedicated to NE once it's bought, instead of relocating
+  hands away from NW. Hands 0-4 (NW) stay exactly as in
+  `melon_then_wheat_agent`; NE becomes pure upside.
+  - Mini-test finding (real obs, not assumed): a newly hired hand always
+    spawns on one of the same 4 shed-access corners
+    (`(4,4)`,`(5,4)`,`(4,5)`,`(5,5)`), whether or not NE is unlocked — no
+    "5th NE corner" appears. Those 3 non-`(5,4)` corners are exactly
+    `SPAWN_FEEDER_NE`'s keys (reused as-is from notebook 11), so hands 5/6
+    route straight into NE without needing NW's own `SPAWN_FEEDER` merged
+    in — simpler than notebook 11's relocated-hands case, since 5/6 are
+    only ever hired *after* NE is already unlocked.
+  - New finding: a single closed loop can't cover NE's 25 tiles split
+    between only 2 hands as two even halves, because a closed cycle
+    visiting every tile exactly once needs an even tile count (grid
+    adjacency is bipartite/checkerboard — each step flips color). Split
+    by rows instead: `ZONE_TOP_NE` (`y=0-1`, 10 tiles, no interior tile so
+    its border alone is a valid cycle) and `ZONE_BOTTOM_NE` (`y=2-4`, 15
+    tiles minus `(8,3)` = 14, the interior tile with no entry-point role
+    dropped to reach an even count). NE ends up with 24/25 tiles tended,
+    one deliberate gap.
+  - Several real bugs found and fixed while writing the agent (not just
+    typos — logic errors that would have silently broken the feature):
+    two independent `HIRE` conditions that could both fire the same turn
+    once NE was unlocked (double-hiring); the raised hire cap nested
+    inside `BUY_LAND`'s `unlocked_quadrants == 1` condition, made
+    unreachable by a second, contradictory `> 1` check on the same
+    nesting; `BUY_LAND` missing the `crop_to_plant == "WHEAT"` gate
+    (would fire turn 0, spending the starting $3000 before any melon
+    income); zone assignment using `i == 3` inside a branch already
+    restricted to `i in (5, 6)` (both hands would have used
+    `ZONE_BOTTOM_NE`, leaving `ZONE_TOP_NE` completely uncovered);
+    `in_own_zone` still checking `HAND_ZONES` instead of the branch's own
+    `own_zone` variable; and the seed-purchase buffer left at 6 (tuned for
+    farmer + 5 hands) despite the hire cap now reaching farmer + 7.
+  - Validated via `evaluate.py` against the current best,
+    `melon_then_wheat_agent`: `win_rate=0.0` for the baseline across two
+    independent `evaluate()` calls (`avg_money` 14569.0 and 14403.0 for
+    the losing side) — beats even `melon_then_wheat_land_agent`'s
+    relocated-hands approach, which lost outright. Graduated to
+    `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_extra_hands_agent`,
+    17 new unit tests in `tests/test_baseline.py`. `RESOURCES.md` updated.
+    Wired into `agent/main.py` (`STRATEGY` switched to
+    `melon_then_wheat_extra_hands_agent`). **Not yet submitted to Kaggle.**
+- 2026-08-23 — Watched a local `kaggle_environments` simulation of the
+  2-hand NE version above and found real NE tiles going untended for
+  extended stretches — confirmed quantifiable, not just visual: hand 6's
+  zone (the old `ZONE_BOTTOM_NE`, 14 tiles) already exceeded the
+  ~12-tiles/day per-unit ceiling `wheat_loop_12_agent` was originally
+  sized against (24 turns/day, ~2 turns/tile) — that check just hadn't
+  been applied to the new NE zones when they were first built. Added a
+  3rd NE hand (index 7) and split `ZONE_BOTTOM_NE`'s 14 tiles by column
+  instead of leaving them to one hand: `ZONE_LEFT_NE` (`x=5-6`, 6 tiles,
+  a 2-column block with no interior, same shape as `ZONE_TOP_NE`) and
+  `ZONE_RIGHT_NE` (`x=7-9` minus `(8,3)`, 8 tiles — turns out to be
+  exactly the border ring of a 3x3 block around the `(8,3)` gap, also
+  interior-free, so no detour needed for either piece). Hire cap raised
+  5→8 (from 5→7); seed buffer raised 8→9 (farmer + up to 8 hands).
+  - **Explicit exception to the "must clear evaluate.py's gate" rule**:
+    head-to-head `evaluate()` against the 2-hand version came back
+    contradictory across two independent runs (`win_rate=1.0` for the
+    2-hand version, then `win_rate=0.0` — `avg_money` 20153.0/20882.0) —
+    inconclusive, not a clean win either way, the first time in this
+    project a graduated change didn't clear that gate. Adopted anyway, by
+    explicit project-owner decision, on the capacity-ceiling argument
+    above rather than the metric. Flagged here and in the function's
+    docstring rather than silently overriding the usual rule.
+  - Graduated in place into
+    `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_extra_hands_agent`
+    (same function name, `ZONE_BOTTOM_NE` replaced by
+    `ZONE_LEFT_NE`/`ZONE_RIGHT_NE`), tests in `tests/test_baseline.py`
+    updated/extended for the 3rd hand (own-zone regression checks for
+    hands 5/6/7, hire cap up to 8, seed buffer up to 9).
+    `RESOURCES.md` updated. Regenerated `agent/main.py` (`STRATEGY`
+    unchanged, only the body changed). **Not yet submitted to Kaggle.**
 
 ## Next steps
 
@@ -590,16 +666,24 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       Extended same day: sell the full shed at once instead of 1/turn
       (matters against a shared market with a melon-selling opponent).
       Wired into `agent/main.py`, not yet submitted to Kaggle.
-- [ ] **Buy land (NE), paused mid-exploration** — bought NE once
-      affordable and relocated hands 3/4 there for WHEAT; geometry works
-      (see 2026-08-22 log entry) but lost 20/20 to `melon_then_wheat_agent`
-      — economic, not a bug (confirmed via replay-diff): land is only
-      affordable ~day 12, leaving too few days to repay the $1000 cost
-      from 2 hands' WHEAT. Follow-up idea queued: hire 2 *extra* hands
-      (no hard cap on hires in the engine) dedicated to NE instead of
-      relocating hands away from NW, so NW coverage never drops. Not yet
-      built. `melon_then_wheat_agent` (no land) remains `agent/main.py`'s
-      `STRATEGY` for now.
+- [x] **Buy land (NE)** — first attempt (relocating hands 3/4 to NE) lost
+      20/20 to `melon_then_wheat_agent`, economic not a bug: land only
+      affordable ~day 12, too few days to repay $1000 from 2 hands' WHEAT
+      (2026-08-22 log entry). Follow-up idea — hire 2 *extra* hands
+      (indices 5, 6) dedicated to NE instead of relocating, so NW coverage
+      never drops — built and validated 2026-08-23:
+      `melon_then_wheat_extra_hands_agent` beats `melon_then_wheat_agent`
+      decisively, 20/20 across two runs (see 2026-08-23 log entry for the
+      real bugs found and fixed along the way, plus the checkerboard
+      parity finding behind `ZONE_TOP_NE`/`ZONE_BOTTOM_NE`'s tile split).
+      Extended same day to a 3rd NE hand after watching a local replay
+      show real coverage gaps, traced to hand 6's zone exceeding the
+      ~12-tiles/day per-unit ceiling — `ZONE_BOTTOM_NE` split into
+      `ZONE_LEFT_NE`/`ZONE_RIGHT_NE`. Adopted despite an inconclusive
+      head-to-head `evaluate()` against the 2-hand version (contradictory
+      across two runs), an explicit exception to the usual validation
+      gate — see the second 2026-08-23 log entry. Wired into
+      `agent/main.py`. **Not yet submitted to Kaggle.**
 - [ ] Per-tile crop choice by ROI (the Yield/tile/day column in README.md)
       — actually compare $/tile/day across crops (needs melon's — and
       other crops' — sell-price behavior, not yet explored) instead of a

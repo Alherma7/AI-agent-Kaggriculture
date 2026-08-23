@@ -149,6 +149,43 @@ function's docstring.
   choice, which was tested only for WHEAT against non-melon-selling
   baselines and found inconclusive there.
 
+- **`kaggriculture.py::_spawn_hand`, read directly** (mini-test in
+  `notebooks/12_buy_land_extra_hands.ipynb`, 2026-08-23) plus a
+  grid-graph parity argument (own reasoning, not sourced)
+  Why: confirmed a newly hired hand always spawns on the same 4
+  shed-access corners regardless of how many quadrants are unlocked — no
+  "5th NE corner" appears once NE is bought — so `SPAWN_FEEDER_NE` (reused
+  from notebook 11) covers hands 5/6's spawn routing on its own, no NW
+  merge needed. Separately: a closed cycle that visits every tile exactly
+  once needs an even tile count, since grid adjacency is
+  bipartite/checkerboard-colored (each step flips color, so returning to
+  the start after visiting every tile requires an even number of steps) —
+  this is why NE's 25 tiles can't split evenly between 2 hands' zones,
+  forcing the one-tile gap in `ZONE_BOTTOM_NE`. Source for
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_extra_hands_agent`
+  (validated in `notebooks/12_buy_land_extra_hands.ipynb`, tested in
+  `tests/test_baseline.py`): hires 2 extra hands (indices 5, 6) dedicated
+  to NE once bought, instead of relocating hands away from NW (the
+  `notebooks/11_buy_land_ne.ipynb` approach that lost 20/20) — beats
+  `melon_then_wheat_agent` decisively.
+
+- **A local `kaggle_environments` simulation replay, watched directly**
+  (own observation, 2026-08-23) plus the same `wheat_loop_12_agent`
+  ~12-tiles/day ceiling cited above
+  Why: showed the 2-hand NE version leaving real tiles untended for
+  extended stretches — and the reason was quantifiable, not just visual:
+  hand 6's zone (14 tiles, one hand) already exceeded the same
+  ~12-tiles/day per-unit capacity ceiling `wheat_loop_12_agent` was
+  originally sized against, a check that hadn't been re-applied when the
+  NE zones were first built. Source for the 3-hand NE split in
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_extra_hands_agent`
+  (`ZONE_LEFT_NE`/`ZONE_RIGHT_NE` replacing `ZONE_BOTTOM_NE`, tested in
+  `tests/test_baseline.py`) — adopted on this capacity argument despite
+  an inconclusive head-to-head `evaluate()` against the 2-hand version
+  (contradictory across two independent runs), an explicit,
+  project-owner-approved exception to this project's usual "must clear
+  evaluate.py's gate" rule.
+
 - **`notebooks/kaggriculture-getting-started.ipynb`** (bovard, official Kaggle
   starter kernel)
   Why: confirms `obs` supports both `.get()` and dotted attribute access;
