@@ -565,6 +565,30 @@ real state of `src/` and `agent/main.py`.
     hands 5/6/7, hire cap up to 8, seed buffer up to 9).
     `RESOURCES.md` updated. Regenerated `agent/main.py` (`STRATEGY`
     unchanged, only the body changed). **Not yet submitted to Kaggle.**
+- 2026-08-23 — Submitted v5 (the 2-hand NE version, before the 3rd-hand
+  fix above) to Kaggle. Lost to `Saravana Thiagarajan K`, 31256 vs 88518
+  (episode `97648603`, saved to `replays/`). Analyzed the same way as
+  prior submissions:
+  - Confirms the 2-hand NE version's behavior exactly as built: hand
+    count caps at 5 through day 10, jumps to 7 the turn after `BUY_LAND`
+    resolves (day 11), stays there. `BUY_LAND` fires exactly once. Watching
+    this same replay locally is what prompted the 3-hand fix above — real
+    NE tiles sat untended.
+  - **New finding**: the opponent runs 3 income streams we have none or
+    only one of: 3 crops (`WHEAT`/`MELON`/`STRAWBERRY`, we only do 2),
+    2 animals (`COW`→`MILK`, `SHEEP`→`WOOL`, 128/171 units sold — we have
+    zero animal actions), and sells `FERTILIZER` directly, 206 units — a
+    revenue stream that doesn't even require an animal-product harvest
+    step. They also expand land far more aggressively: `NE` bought day 7
+    (vs. our day 11) and `SW` bought day 11, reaching 12 hands by day 11
+    (vs. our cap of 7). They also buy `WHEAT` from the market (105 units)
+    rather than growing all of it themselves, presumably to guarantee
+    enough to `FEED` animals daily regardless of their own harvest timing.
+  - Confirms the 2026-08-20 (Muhammed Ali Kul replay) finding that animals
+    are a second major lever, still unbuilt (`Next steps` below) — this
+    replay adds fertilizer-as-direct-revenue and a 3rd crop as further
+    gaps, and shows land/hands expansion has more headroom than our
+    current pace even before animals enter the picture.
 
 ## Next steps
 
@@ -683,7 +707,10 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       head-to-head `evaluate()` against the 2-hand version (contradictory
       across two runs), an explicit exception to the usual validation
       gate — see the second 2026-08-23 log entry. Wired into
-      `agent/main.py`. **Not yet submitted to Kaggle.**
+      `agent/main.py` (the 3-hand version). Note: v5, submitted before
+      this 3-hand fix (the 2-hand version), lost to `Saravana Thiagarajan K`
+      31256 vs 88518 (episode `97648603`) — see the third 2026-08-23 log
+      entry; the 3-hand version itself hasn't been submitted yet.
 - [ ] Per-tile crop choice by ROI (the Yield/tile/day column in README.md)
       — actually compare $/tile/day across crops (needs melon's — and
       other crops' — sell-price behavior, not yet explored) instead of a
