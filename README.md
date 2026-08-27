@@ -1,6 +1,6 @@
 # Kaggriculture Agent — Alejandro Hernández Mairal
 
-![wheat_loop_hands_agent mid-game](kaggriculture_agent_v4.png)
+![melon_then_wheat_goose_agent, day 30 validation replay (coop/chickens visible)](kaggriculture_agent_v5.png)
 
 Heuristic agent for the Kaggriculture Kaggle simulation competition, built up incrementally: a single-tile wheat loop, then farmer movement over a growing closed tile loop (12 tiles), then hired farm hands each tending their own zone (`wheat_loop_hands_agent`). See [`PROGRESS.md`](PROGRESS.md) for the full development log and [`RESOURCES.md`](RESOURCES.md) for sources.
 
