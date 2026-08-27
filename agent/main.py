@@ -52,83 +52,73 @@ HAND_ZONES = [
     {(0, 1): (0, 2), (0, 2): (1, 2), (1, 2): (0, 2)},  # hand 3: settles on (0,2)<->(1,2), the LOOP_ORDER_HANDS gap
     {(4, 2): (4, 2)},  # hand 4: single tile, self-loop
 ]
-LOOP_ORDER_HANDS_NE = {
-    (5, 4): (6, 4), (6, 4): (7, 4), (7, 4): (8, 4), (8, 4): (9, 4),
-    (9, 4): (9, 3), (9, 3): (9, 2), (9, 2): (9, 1), (9, 1): (9, 0),
-    (9, 0): (8, 0), (8, 0): (7, 0), (7, 0): (6, 0), (6, 0): (5, 0),
-    (5, 0): (5, 1), (5, 1): (5, 2), (5, 2): (5, 3), (5, 3): (5, 4),
-}
-SPAWN_FEEDER_NE = {(4, 4): (5, 4), (4, 5): (4, 4), (5, 5): (5, 4)}
-ZONE_TOP_NE = {
-    (5, 0): (6, 0), (6, 0): (7, 0), (7, 0): (8, 0), (8, 0): (9, 0),
-    (9, 0): (9, 1), (9, 1): (8, 1), (8, 1): (7, 1), (7, 1): (6, 1),
-    (6, 1): (5, 1), (5, 1): (5, 0),
-}
-ZONE_LEFT_NE = {
-    (5, 2): (6, 2), (6, 2): (6, 3), (6, 3): (6, 4),
-    (6, 4): (5, 4), (5, 4): (5, 3), (5, 3): (5, 2),
-}
-ZONE_RIGHT_NE = {
-    (7, 2): (8, 2), (8, 2): (9, 2), (9, 2): (9, 3), (9, 3): (9, 4),
-    (9, 4): (8, 4), (8, 4): (7, 4), (7, 4): (7, 3), (7, 3): (7, 2),
-}
+GOOSE_TILE = (4, 2)
+SHED_ADJACENT = {(4, 4), (5, 4), (4, 5), (5, 5)}
+GOOSE_FEEDER = {(4, 4): (4, 3), (4, 3): (4, 2), (4, 2): (4, 2)}
 
 
 def agent(obs):
-    """melon_then_wheat_agent extended with 3 extra hands (indices 5, 6, 7)
-    dedicated to farming NE, hired only once NE is bought -- instead of
-    relocating hands away from NW, which notebooks/11_buy_land_ne.ipynb's
-    melon_then_wheat_land_agent tried and lost 20/20 to melon_then_wheat_agent
-    (confirmed economic, not a bug, via replay-diff: NE was only affordable
-    ~day 12, too few days left to repay the $1000 cost from 2 relocated
-    hands' WHEAT). Since hiring has no hard cap in the engine
-    (kaggriculture.py::_do_hire only checks affordability), hiring extra
-    hands instead keeps NW's full coverage (hands 0-4, HAND_ZONES,
-    melon-then-wheat by day, all unchanged) while NE becomes pure upside.
+    """melon_then_wheat_agent extended with a goose/egg income stream on
+    hand 4, instead of that hand's own single-tile crop zone. Motivated by
+    the v5 replay (PROGRESS.md, 2026-08-23): the opponent ran COW/SHEEP
+    and direct FERTILIZER sales, income streams we had none of. Goose
+    chosen over cow/sheep as the first animal: cheapest to buy ($300 vs
+    $400/$500), fastest first yield (day 4 vs day 8/6), and no
+    every-N-days interval bookkeeping (eggs produce daily once fed).
 
-    Built and validated in notebooks/12_buy_land_extra_hands.ipynb:
-    - Hire cap: 5 normally, rising to 8 only once `"NE" in
-      unlocked_quadrants` -- as two mutually-exclusive `if`/`elif`
-      branches, not two independent `if`s (which would double-hire on any
-      turn where both conditions hold -- e.g. every day after NE is
-      bought, since hands reset to 0 daily but `unlocked_quadrants` never
-      does).
-    - Mini-test finding (real obs, not assumed): a newly hired hand always
-      spawns on one of the same 4 shed-access corners
-      ((4,4),(5,4),(4,5),(5,5)), regardless of how many quadrants are
-      unlocked -- no "5th NE corner" ever appears. Those 3 non-(5,4)
-      corners are exactly SPAWN_FEEDER_NE's keys (reused as-is from
-      notebook 11), so hands 5/6/7 route straight to NE without needing
-      NW's own SPAWN_FEEDER merged in, unlike the mid-day-unlock edge case
-      melon_then_wheat_land_agent had to handle for relocated hands 3/4.
-    - Hands 5/6/7 always tend WHEAT rather than following the day-based
-      crop_to_plant cycle -- equivalent in practice, since BUY_LAND itself
-      is gated on `crop_to_plant == "WHEAT"`, so these hands never exist
-      before the WHEAT phase starts anyway.
-    - Three zones split NE's 25 tiles (LOOP_ORDER_HANDS_NE, the shared
-      16-tile border loop, is reused unchanged as the access path):
-      ZONE_TOP_NE (10), ZONE_LEFT_NE (6), ZONE_RIGHT_NE (8) -- see their
-      own comments for the tile split and the parity constraint behind it.
+    Built in notebooks/13_animals.ipynb, in three stages, two of them
+    negative results kept for the record rather than silently discarded:
 
-    **2-hand vs. 3-hand NE split (2026-08-23)**: the first version (hands
-    5/6 only, one hand covering all 14 of ZONE_TOP_NE's complement) beat
-    melon_then_wheat_agent decisively (win_rate=0.0 for the baseline,
-    avg_money 14569.0/14403.0 across two independent evaluate() calls).
-    But watching a local kaggle_environments replay of that version showed
-    real NE tiles going untended for extended stretches -- and the reason
-    is quantifiable, not just visual: ZONE_BOTTOM_NE's 14 tiles for a
-    single hand already exceeded the ~12-tiles/day ceiling derived for
-    wheat_loop_12_agent (24 turns/day, ~2 turns/tile) -- the same capacity
-    limit, just not checked against when that zone was first built. This
-    3-hand version (adding hand 7, splitting the 14 tiles into 6+8) fixes
-    that on the same structural grounds `wheat_loop_12_agent` itself was
-    sized against. Head-to-head `evaluate()` against the 2-hand version
-    came back contradictory across two independent runs (win_rate=1.0 for
-    the 2-hand version, then win_rate=0.0 -- avg_money 20153.0/20882.0),
-    i.e. inconclusive rather than a clean win either way. Adopted anyway
-    on the capacity-ceiling argument above, an explicit exception to this
-    project's usual "must clear evaluate.py's gate" rule -- flagged here
-    rather than silently overriding it.
+    1. **Isolated mini-test** (`_test_goose_agent`, farmer-only, a
+       BUY_PRODUCT WHEAT shortcut standing in for real income): validated
+       the full BUILD_COOP -> PICKUP -> PLACE -> FEED/COLLECT_FERTILIZER/
+       CARE/HARVEST cycle against a real `obs`, finding and fixing several
+       bugs a docs-only read would have missed -- a `tile` that's `None`
+       before BUILD_COOP, `fed_today` vs. `coop_age` for the daily-care
+       gate, `PICKUP` requiring shed-adjacency, and hands/inventories
+       resetting to the shed every day.
+    2. **First integration attempt**: a dedicated 9th hand, hired only
+       after buying NE land, coop on NE's one unclaimed tile. Lost 0/10 to
+       `melon_then_wheat_extra_hands_agent` -- a real negative result, not
+       a bug (the mechanism itself worked). Root cause (found via replay
+       trace): the goose wasn't placed until day 14 (land + hire + a
+       couple of shed round-trips first), leaving too little season left,
+       on top of a daily NE-border walk that produced nothing.
+    3. **This version**: folds the goose into hand 4 of
+       `melon_then_wheat_agent` directly -- no land purchase or dedicated
+       hire needed, isolating the placement-delay problem from the NE-walk
+       one. Three more real bugs found and fixed along the way, each
+       confirmed by tracing hand 4's own position/tile/inventory turn by
+       turn (not guessed):
+       - Standing on a `"LOCKED"` tile silently no-ops *any* non-move
+         action (confirmed reading `kaggriculture.py::_apply_unit_action`)
+         -- without an explicit check, hand 4 got stuck forever retrying
+         `PICKUP` from a locked spawn corner.
+       - The `PICKUP WHEAT` condition needs the same
+         `shed.get("WHEAT", 0) > 0` guard the `PICKUP GOOSE` one already
+         had -- without it, hand 4 kept "trying" (and silently failing) to
+         pick up wheat that didn't exist yet, permanently blocking the
+         walk instead of falling through to tend/move.
+       - The goose starves and escapes (`consecutive_unfed >= 2`, per
+         `_daily_refresh_animals`) before day 10, since nobody -- including
+         hand 4's own opportunistic tending -- grows WHEAT during the
+         melon phase. Fixed with a `BUY_PRODUCT WHEAT` order whenever the
+         shed is empty pre-day-10. That fix then caused a *second*
+         regression -- hand 4 stopped reaching the coop at all, for the
+         entire game -- diagnosed by comparing turns-per-node with and
+         without the change: hand 4 only ever completes the 15-move
+         `LOOP_ORDER_HANDS` walk with zero turns to spare (19 turns
+         available, hired at hour 5), so the one extra `PICKUP WHEAT` this
+         fix adds at `(4,4)` was exactly the turn that used to close the
+         gap. Fixed with `GOOSE_FEEDER`, a direct 2-step route bypassing
+         the shared loop entirely, plus ungating the whole coop cycle from
+         holding WHEAT (only `FEED` needs it -- `COLLECT_FERTILIZER`/
+         `CARE`/`HARVEST` don't, and were being skipped for nothing).
+
+    Validated via `evaluate(melon_then_wheat_goose_agent,
+    melon_then_wheat_agent, n=10)` across two independent calls:
+    `win_rate=1.0` both times (`avg_money` 28871.0 and 29748.0), coop and
+    goose placed on day 0 in the traced episode, all 30 days reached.
     """
     crop_to_plant = "MELON" if obs["day"] < 10 else "WHEAT"
     crop_seeds = obs["private"]["seeds"].get(crop_to_plant, 0)
@@ -136,16 +126,16 @@ def agent(obs):
     market = []
     hands = []
 
-    ne_zone_by_index = {5: ZONE_TOP_NE, 6: ZONE_LEFT_NE, 7: ZONE_RIGHT_NE}
+    if obs["step"] == 0:
+        market.append(["BUY_ANIMAL", "GOOSE", 1])
+    if obs["day"] < 10 and obs["private"]["shed"].get("WHEAT", 0) == 0:
+        market.append(["BUY_PRODUCT", "WHEAT", 1])
 
     for i, (hx, hy) in enumerate(obs["farms"][obs["player"]]["hands"]):
-        if i in ne_zone_by_index:
-            own_zone = ne_zone_by_index[i]
-            hand_loop = {**LOOP_ORDER_HANDS_NE, **SPAWN_FEEDER_NE, **own_zone}
+        if i == 4:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **GOOSE_FEEDER}
         else:
-            own_zone = HAND_ZONES[i % len(HAND_ZONES)]
-            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **own_zone}
-
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **HAND_ZONES[i % len(HAND_ZONES)]}
         target_x, target_y = hand_loop[(hx, hy)]
         if (target_x, target_y) == (hx, hy):
             move = ["PASS"]
@@ -153,8 +143,56 @@ def agent(obs):
             move = [DIRECTIONS[(target_x - hx, target_y - hy)]]
 
         hand_tile = obs["farms"][obs["player"]]["tiles"][hy][hx]
-        in_own_zone = (hx, hy) in own_zone
-        if hand_tile == "LOCKED" or not in_own_zone:
+
+        if i == 4:
+            hand_inventory = obs["private"]["inventories"][i + 1]
+
+            if (hx, hy) == GOOSE_TILE:
+                # At the coop.
+                if hand_tile is None:
+                    op = ["BUILD_COOP"]
+                elif hand_tile.get("kind") == "COOP" and hand_tile.get("animal") != "GOOSE":
+                    if hand_inventory.get("GOOSE", 0) > 0:
+                        op = ["PLACE", "GOOSE", 1]
+                    else:
+                        op = ["PASS"]
+                elif hand_inventory.get("WHEAT", 0) > 0 and not hand_tile.get("fed_today"):
+                    op = ["FEED"]
+                elif hand_tile.get("fertilizer_available"):
+                    op = ["COLLECT_FERTILIZER"]
+                elif not hand_tile.get("cared_today"):
+                    op = ["CARE"]
+                elif hand_tile.get("yield_units", 0) > 0:
+                    op = ["HARVEST"]
+                else:
+                    op = ["PASS"]
+                    egg_in_shed = obs["private"]["shed"].get("EGG", 0)
+                    if egg_in_shed > 0:
+                        market.append(["SELL", "EGG", egg_in_shed])
+            else:
+                # Not at the coop yet: pickup priority (GOOSE, then
+                # WHEAT), only possible while shed-adjacent; otherwise
+                # tend whatever tile it's standing on, same as hands 0-3.
+                if hand_tile == "LOCKED":
+                    op = move
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("GOOSE", 0) == 0 and obs["private"]["shed"].get("GOOSE", 0) > 0:
+                    op = ["PICKUP", "GOOSE", 1]
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("WHEAT", 0) == 0 and obs["private"]["shed"].get("WHEAT", 0) > 0:
+                    op = ["PICKUP", "WHEAT", 1]
+                elif hand_tile is None and crop_seeds > 0:
+                    op = ["PLANT", crop_to_plant]
+                elif hand_tile is not None and hand_tile.get("kind") == "PLANT":
+                    crop_age = obs["day"] - hand_tile["planted_day"]
+                    threshold = 10 if hand_tile["crop"] == "MELON" else 2
+                    if crop_age >= threshold:
+                        op = ["HARVEST"]
+                    elif not hand_tile.get("watered_today"):
+                        op = ["WATER"]
+                    else:
+                        op = move
+                else:
+                    op = move
+        elif hand_tile == "LOCKED" or (hx, hy) not in HAND_ZONES[i % len(HAND_ZONES)]:
             op = move
         elif hand_tile is None and crop_seeds > 0:
             op = ["PLANT", crop_to_plant]
@@ -173,21 +211,9 @@ def agent(obs):
 
     if len(obs["farms"][obs["player"]]["hands"]) < 5:
         market.append(["HIRE"])
-    elif (
-        len(obs["farms"][obs["player"]]["unlocked_quadrants"]) > 1
-        and len(obs["farms"][obs["player"]]["hands"]) < 8
-    ):
-        market.append(["HIRE"])
 
     if obs["step"] == 0 or crop_seeds <= 5:
-        market.append(["BUY_SEED", crop_to_plant, 9 - crop_seeds])
-
-    if (
-        obs["farms"][obs["player"]]["money"] >= 1000
-        and len(obs["farms"][obs["player"]]["unlocked_quadrants"]) == 1
-        and crop_to_plant == "WHEAT"
-    ):
-        market.append(["BUY_LAND"])
+        market.append(["BUY_SEED", crop_to_plant, 6 - crop_seeds])
 
     farmer_pos = obs["farms"][obs["player"]]["farmer"]
     x, y = farmer_pos
@@ -198,8 +224,8 @@ def agent(obs):
 
     wheat_in_shed = obs["private"]["shed"].get("WHEAT", 0)
     melon_in_shed = obs["private"]["shed"].get("MELON", 0)
-    if wheat_in_shed > 0:
-        market.append(["SELL", "WHEAT", wheat_in_shed])
+    if wheat_in_shed > 1:
+        market.append(["SELL", "WHEAT", wheat_in_shed - 1])
     if melon_in_shed > 0:
         market.append(["SELL", "MELON", melon_in_shed])
 

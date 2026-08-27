@@ -186,6 +186,31 @@ function's docstring.
   project-owner-approved exception to this project's usual "must clear
   evaluate.py's gate" rule.
 
+- **`kaggriculture.py`, read directly** (`_apply_unit_action`,
+  `_is_shed_adjacent`, `_daily_refresh_animals`, `_commit_unit`'s
+  `BUY_PRODUCT` branch, `_end_of_day`'s `_drop_inventories_to_shed`) —
+  mini-tests and trace debugging in `notebooks/13_animals.ipynb`,
+  2026-08-27
+  Why: confirmed several mechanics not documented in `AGENTS.md`/`README.md`
+  in enough detail to code against blind — standing on a `"LOCKED"` tile
+  silently no-ops any non-move action (not just tile-tending ones);
+  `PICKUP`/`DROP` require standing on one of the 4 shed-adjacent corners;
+  a placed animal escapes after `consecutive_unfed >= 2`; `BUY_PRODUCT`
+  (`WHEAT`/`FERTILIZER` only) deposits straight into the shed, not the
+  buyer's inventory; and all held inventory is auto-dropped into the shed
+  at `_end_of_day`, before positions/inventories reset. Source for
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_agent`
+  (validated in `notebooks/13_animals.ipynb`, tested in
+  `tests/test_baseline.py`): folds a goose/egg income stream into hand 4
+  of `melon_then_wheat_agent`, beating it decisively (`win_rate=1.0`
+  across two independent `evaluate()` calls). Two prior attempts logged
+  as negative results in the same notebook and in `PROGRESS.md` rather
+  than discarded: a dedicated 9th hand on NE land (lost 0/10, placement
+  delayed to day 14) and an early fold-in that starved the goose before
+  day 10 (no `WHEAT` exists during the melon phase) and then, once fixed
+  with a `BUY_PRODUCT` order, missed its own turn budget for reaching the
+  coop at all (diagnosed by an Opus-run instrumented A/B, not guessed).
+
 - **`notebooks/kaggriculture-getting-started.ipynb`** (bovard, official Kaggle
   starter kernel)
   Why: confirms `obs` supports both `.get()` and dotted attribute access;

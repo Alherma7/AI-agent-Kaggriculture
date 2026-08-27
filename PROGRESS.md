@@ -589,6 +589,50 @@ real state of `src/` and `agent/main.py`.
     replay adds fertilizer-as-direct-revenue and a 3rd crop as further
     gaps, and shows land/hands expansion has more headroom than our
     current pace even before animals enter the picture.
+- 2026-08-26/27 — `notebooks/13_animals.ipynb`: first animal, goose/egg,
+  built in three stages (see the graduated function's own docstring in
+  `baseline.py` for the full account):
+  1. Isolated mini-test (`_test_goose_agent`, farmer-only, `BUY_PRODUCT
+     WHEAT` standing in for real income) validated the full
+     `BUILD_COOP`/`PICKUP`/`PLACE`/`FEED`/`COLLECT_FERTILIZER`/`CARE`/
+     `HARVEST` cycle against a real `obs`, reading `kaggriculture.py`
+     directly for mechanics `AGENTS.md` doesn't spell out (see
+     `RESOURCES.md`'s new entry).
+  2. First integration: a dedicated 9th hand, hired only after buying NE
+     land. **Lost 0/10** to `melon_then_wheat_extra_hands_agent` — logged
+     as a negative result, not a bug: placement delayed to day 14
+     (land + hire + shed round-trips first), plus a daily NE-border walk
+     producing nothing.
+  3. Second attempt: folded the goose into hand 4 of `melon_then_wheat_agent`
+     directly (no land/hire needed), replacing that hand's own single-tile
+     crop zone. Real bugs found and fixed via turn-by-turn tracing, not
+     guessed: a `"LOCKED"` tile silently blocks *any* non-move action
+     (confirmed in engine source), stalling hand 4 forever at a locked
+     spawn corner; `PICKUP WHEAT` needed the same `shed > 0` guard
+     `PICKUP GOOSE` already had, or it stalls the same way once the shed's
+     empty; and the goose starves before day 10 since nobody grows `WHEAT`
+     during the melon phase — fixed with a `BUY_PRODUCT WHEAT` top-up,
+     which then caused a *second* regression (hand 4 stopped reaching the
+     coop at all, for the whole game). Diagnosed by delegating to an
+     Opus-run agent for an instrumented, seeded A/B (project owner's
+     explicit call, per this session's "use Opus" instruction) rather than
+     keep eyeballing raw traces: hand 4 is hired at hour 5 (19 turns left)
+     and the shared `LOOP_ORDER_HANDS` walk is exactly 15 moves — zero
+     slack once a second `PICKUP` is added. Fixed with `GOOSE_FEEDER`, a
+     direct 2-step route bypassing the shared loop, plus ungating the
+     whole coop cycle from holding `WHEAT` (only `FEED` needs it —
+     `COLLECT_FERTILIZER`/`CARE`/`HARVEST` were being skipped for
+     nothing, so eggs were never harvested even at `max_held`).
+  - Validated via `evaluate(melon_then_wheat_goose_agent,
+    melon_then_wheat_agent, n=10)` across two independent calls:
+    `win_rate=1.0` both times (`avg_money` 28871.0 and 29748.0). Graduated
+    to
+    `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_agent`,
+    16 new unit tests in `tests/test_baseline.py`. `RESOURCES.md` updated.
+    Wired into `agent/main.py` (`STRATEGY` switched); the generated file
+    validated standalone against `melon_then_wheat_agent` the same way as
+    prior graduations: `win_rate=1.0` across two independent calls
+    (`avg_money` 29065.0, 28350.0). **Not yet submitted to Kaggle.**
 
 ## Next steps
 
@@ -718,7 +762,13 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       CARROT/TOMATO/STRAWBERRY
 - [ ] Price-aware selling (avoid crashing premium goods to the $1 floor by
       dumping full inventory at once)
-- [ ] Animals: coop/pasture, feed, care, fertilizer loop
+- [x] **Animals (first increment: goose/egg)** — folded into hand 4 of
+      `melon_then_wheat_agent` (no dedicated hand/land needed), graduated
+      as `melon_then_wheat_goose_agent` (see 2026-08-26/27 log entry).
+      Beats `melon_then_wheat_agent` decisively, `win_rate=1.0` across two
+      runs. Wired into `agent/main.py`, not yet submitted to Kaggle.
+      Cow/sheep (pasture, interval-based production) not yet built —
+      `COOP`/`PASTURE` are structurally the same, should generalize.
 - [ ] Buy land only when projected ROI beats the cost ($1k/$2k/$4k) —
       note HechtJP never bought land in the replay we studied, stayed in
       the free NW quadrant the whole game

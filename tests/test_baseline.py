@@ -24,6 +24,9 @@ from kaggriculture_bot.strategies.baseline import (
     ZONE_LEFT_NE,
     ZONE_RIGHT_NE,
     melon_then_wheat_extra_hands_agent,
+    GOOSE_TILE,
+    GOOSE_FEEDER,
+    melon_then_wheat_goose_agent,
 )
 
 
@@ -944,3 +947,215 @@ def test_extra_hands_farmer_still_follows_loop_order_12():
     obs = make_ne_obs(day=0, farmer=(1, 4), tiles={(1, 4): tile})
     action = melon_then_wheat_extra_hands_agent(obs)
     assert action["farmer"] == ["WEST"]
+def make_goose_obs(
+    *,
+    step=5,
+    day=0,
+    seeds=0,
+    shed=0,
+    melon_seeds=0,
+    melon_shed=0,
+    goose_shed=0,
+    egg_shed=0,
+    farmer=(4, 4),
+    hands=(),
+    tiles=None,
+    money=3000,
+    unlocked_quadrants=("NW",),
+    inventories=None,
+):
+    """Like make_hands_obs, but adds private.inventories (hand 4's own
+    inventory in melon_then_wheat_goose_agent lives at inventories[5]) and
+    GOOSE/EGG shed keys."""
+    board = [[None] * 6 for _ in range(6)]
+    for (x, y), tile in (tiles or {}).items():
+        board[y][x] = tile
+    if inventories is None:
+        inventories = [{} for _ in range(len(hands) + 1)]
+    return {
+        "player": 0,
+        "step": step,
+        "day": day,
+        "farms": [
+            {
+                "farmer": list(farmer),
+                "hands": [list(h) for h in hands],
+                "tiles": board,
+                "money": money,
+                "unlocked_quadrants": list(unlocked_quadrants),
+            }
+        ],
+        "private": {
+            "seeds": {"WHEAT": seeds, "MELON": melon_seeds},
+            "shed": {"WHEAT": shed, "MELON": melon_shed, "GOOSE": goose_shed, "EGG": egg_shed},
+            "inventories": inventories,
+        },
+    }
+
+
+def test_goose_buys_goose_on_step_zero():
+    obs = make_goose_obs(step=0, hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_agent(obs)
+    assert ["BUY_ANIMAL", "GOOSE", 1] in action["market"]
+
+
+def test_goose_buys_wheat_product_during_melon_phase_when_shed_empty():
+    obs = make_goose_obs(day=5, shed=0, hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_agent(obs)
+    assert ["BUY_PRODUCT", "WHEAT", 1] in action["market"]
+
+
+def test_goose_does_not_buy_wheat_product_once_shed_has_some():
+    obs = make_goose_obs(day=5, shed=1, hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_agent(obs)
+    assert ["BUY_PRODUCT", "WHEAT", 1] not in action["market"]
+
+
+def test_goose_does_not_buy_wheat_product_after_day_ten():
+    # Regression: this must stop once real WHEAT growing starts, otherwise
+    # it's needless spend on top of the harvested supply.
+    obs = make_goose_obs(day=10, shed=0, hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_agent(obs)
+    assert ["BUY_PRODUCT", "WHEAT", 1] not in action["market"]
+
+
+def test_goose_hand_uses_direct_feeder_route_not_shared_loop():
+    # LOOP_ORDER_HANDS would send (4,4) -> (3,4) (WEST). GOOSE_FEEDER sends
+    # it -> (4,3) (NORTH) instead -- the whole point of the direct route
+    # (see the function docstring: hand 4 has zero turns of slack for the
+    # full 15-move shared loop).
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["NORTH"]
+
+
+def test_goose_hand_picks_up_goose_when_shed_has_one():
+    obs = make_goose_obs(goose_shed=1, hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["PICKUP", "GOOSE", 1]
+
+
+def test_goose_hand_picks_up_wheat_once_carrying_goose_and_shed_has_wheat():
+    obs = make_goose_obs(
+        shed=1,
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)],
+        inventories=[{}, {}, {}, {}, {}, {"GOOSE": 1}],
+    )
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["PICKUP", "WHEAT", 1]
+
+
+def test_goose_hand_does_not_stall_trying_to_pick_up_wheat_that_does_not_exist():
+    # Regression for the real bug found in notebooks/13_animals.ipynb:
+    # without the shed.get("WHEAT", 0) > 0 guard, this condition stayed
+    # true forever (shed always 0 during the melon phase), permanently
+    # blocking hand 4 at (4,4) instead of falling through to tend/move.
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": False}
+    obs = make_goose_obs(
+        shed=0,
+        tiles={(4, 4): tile},
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)],
+    )
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["WATER"]
+
+
+def test_goose_hand_moves_off_locked_spawn_corner():
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), (3, 4), (3, 4), (5, 4)], tiles={(5, 4): "LOCKED"})
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["WEST"]
+
+
+def test_goose_hand_tends_a_transit_tile_opportunistically():
+    # (4,3) is on the way to GOOSE_TILE but not GOOSE_TILE itself, and not
+    # shed-adjacent -- the whole point of folding the goose into hand 4
+    # instead of a dedicated hand: this used to be pure wasted transit.
+    obs = make_goose_obs(
+        day=0,
+        melon_seeds=1,
+        tiles={(4, 3): None},
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 3)],
+    )
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["PLANT", "MELON"]
+
+
+def test_goose_hand_builds_coop_on_empty_goose_tile():
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), (3, 4), (3, 4), GOOSE_TILE], tiles={GOOSE_TILE: None})
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["BUILD_COOP"]
+
+
+def test_goose_hand_places_goose_when_carrying_one_on_empty_coop():
+    obs = make_goose_obs(
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), GOOSE_TILE],
+        tiles={GOOSE_TILE: {"kind": "COOP"}},
+        inventories=[{}, {}, {}, {}, {}, {"GOOSE": 1}],
+    )
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["PLACE", "GOOSE", 1]
+
+
+def test_goose_hand_feeds_when_carrying_wheat_and_not_fed_today():
+    tile = {
+        "kind": "COOP",
+        "animal": "GOOSE",
+        "fed_today": False,
+        "cared_today": False,
+        "fertilizer_available": False,
+        "yield_units": 0,
+    }
+    obs = make_goose_obs(
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), GOOSE_TILE],
+        tiles={GOOSE_TILE: tile},
+        inventories=[{}, {}, {}, {}, {}, {"WHEAT": 1}],
+    )
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["FEED"]
+
+
+def test_goose_hand_still_cares_without_wheat_in_hand():
+    # Regression for the second real bug found: the old
+    # `if wheat == 0: PASS` gate at the top of this branch skipped
+    # COLLECT_FERTILIZER/CARE/HARVEST too, not just FEED, even on days
+    # hand 4 wasn't carrying wheat -- eggs never got harvested as a result.
+    tile = {
+        "kind": "COOP",
+        "animal": "GOOSE",
+        "fed_today": True,
+        "cared_today": False,
+        "fertilizer_available": False,
+        "yield_units": 0,
+    }
+    obs = make_goose_obs(
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), GOOSE_TILE],
+        tiles={GOOSE_TILE: tile},
+        inventories=[{}, {}, {}, {}, {}, {}],
+    )
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["CARE"]
+
+
+def test_goose_hand_sells_eggs_when_nothing_left_to_do_that_day():
+    tile = {
+        "kind": "COOP",
+        "animal": "GOOSE",
+        "fed_today": True,
+        "cared_today": True,
+        "fertilizer_available": False,
+        "yield_units": 0,
+    }
+    obs = make_goose_obs(
+        egg_shed=2,
+        hands=[(3, 4), (3, 4), (3, 4), (3, 4), GOOSE_TILE],
+        tiles={GOOSE_TILE: tile},
+    )
+    action = melon_then_wheat_goose_agent(obs)
+    assert action["hands"][4] == ["PASS"]
+    assert ["SELL", "EGG", 2] in action["market"]
+
+
+def test_goose_feeder_is_a_closed_two_step_route_to_goose_tile():
+    assert GOOSE_FEEDER[(4, 4)] == (4, 3)
+    assert GOOSE_FEEDER[(4, 3)] == GOOSE_TILE
+    assert GOOSE_FEEDER[GOOSE_TILE] == GOOSE_TILE
