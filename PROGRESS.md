@@ -589,7 +589,7 @@ real state of `src/` and `agent/main.py`.
     replay adds fertilizer-as-direct-revenue and a 3rd crop as further
     gaps, and shows land/hands expansion has more headroom than our
     current pace even before animals enter the picture.
-- 2026-08-26/27 — `notebooks/13_animals.ipynb`: first animal, goose/egg,
+- 2026-08-26/27 — `notebooks/13_goose.ipynb`: first animal, goose/egg,
   built in three stages (see the graduated function's own docstring in
   `baseline.py` for the full account):
   1. Isolated mini-test (`_test_goose_agent`, farmer-only, `BUY_PRODUCT
@@ -769,6 +769,32 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       runs. Wired into `agent/main.py`, not yet submitted to Kaggle.
       Cow/sheep (pasture, interval-based production) not yet built —
       `COOP`/`PASTURE` are structurally the same, should generalize.
+- [ ] **Combine the goose with `melon_then_wheat_extra_hands_agent`'s
+      NE land + extra hands (5/6/7)** — `melon_then_wheat_goose_agent`
+      was deliberately built on plain `melon_then_wheat_agent` (2026-08-27
+      log entry: isolates the placement-delay hypothesis from the
+      NE-walk-overhead one), so it currently has *no* `BUY_LAND` and caps
+      at 5 hands — a real regression vs. the land/hands agent, not
+      something the goose fix touched. Should now be safe to combine:
+      hand 4's `GOOSE_FEEDER` route is a direct 2-step path, independent
+      of hands 5/6/7's NE zones, so it shouldn't reopen the turn-budget
+      problem that sank the first (9-hand) goose attempt.
+- [ ] **Sell (or apply) the `FERTILIZER` the goose produces** — noticed
+      2026-08-27 via a Kaggle validation-replay screenshot showing 27
+      units piled up unused. `melon_then_wheat_goose_agent` already does
+      `COLLECT_FERTILIZER` (into hand 4's inventory, auto-dropped to the
+      shed at day's end per `_drop_inventories_to_shed`) but never sells
+      or uses it after that — confirmed by reading the engine directly:
+      `FERTILIZE` (consumes 1 from the *acting unit's own* inventory,
+      standing on a `PLANT` tile) doubles that tile's harvest yield for
+      the next 3 days (`fertilized_until_day`); alternatively a plain
+      `SELL FERTILIZER` order, same as `WHEAT`/`MELON` (the v5 opponent,
+      `Saravana Thiagarajan K`, sold 206 units this way with no animal
+      product involved). Selling is the simpler first step -- one more
+      `market.append` next to the existing `SELL WHEAT`/`SELL MELON`
+      lines. Using `FERTILIZE` is more involved since hand 4 no longer
+      tends any crop tile of its own (it goes straight to the coop via
+      `GOOSE_FEEDER`) -- would need to hand the item to another unit.
 - [ ] Buy land only when projected ROI beats the cost ($1k/$2k/$4k) —
       note HechtJP never bought land in the replay we studied, stayed in
       the free NW quadrant the whole game

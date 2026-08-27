@@ -901,7 +901,7 @@ def melon_then_wheat_extra_hands_agent(obs):
 # GOOSE_TILE was hand 4's own single-tile crop zone in HAND_ZONES (a
 # self-loop) -- repurposed as the coop instead: cheapest zone to give up,
 # and the closest zoned tile to the shed respawn point (4,4). See
-# notebooks/13_animals.ipynb.
+# notebooks/13_goose.ipynb.
 GOOSE_TILE = (4, 2)
 
 # PICKUP/DROP only work standing on one of these 4 shed-access corners
@@ -926,7 +926,7 @@ def melon_then_wheat_goose_agent(obs):
     $400/$500), fastest first yield (day 4 vs day 8/6), and no
     every-N-days interval bookkeeping (eggs produce daily once fed).
 
-    Built in notebooks/13_animals.ipynb, in three stages, two of them
+    Built in notebooks/13_goose.ipynb, in three stages, two of them
     negative results kept for the record rather than silently discarded:
 
     1. **Isolated mini-test** (`_test_goose_agent`, farmer-only, a

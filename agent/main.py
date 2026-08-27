@@ -66,7 +66,7 @@ def agent(obs):
     $400/$500), fastest first yield (day 4 vs day 8/6), and no
     every-N-days interval bookkeeping (eggs produce daily once fed).
 
-    Built in notebooks/13_animals.ipynb, in three stages, two of them
+    Built in notebooks/13_goose.ipynb, in three stages, two of them
     negative results kept for the record rather than silently discarded:
 
     1. **Isolated mini-test** (`_test_goose_agent`, farmer-only, a

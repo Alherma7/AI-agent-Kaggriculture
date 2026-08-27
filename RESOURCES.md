@@ -189,7 +189,7 @@ function's docstring.
 - **`kaggriculture.py`, read directly** (`_apply_unit_action`,
   `_is_shed_adjacent`, `_daily_refresh_animals`, `_commit_unit`'s
   `BUY_PRODUCT` branch, `_end_of_day`'s `_drop_inventories_to_shed`) —
-  mini-tests and trace debugging in `notebooks/13_animals.ipynb`,
+  mini-tests and trace debugging in `notebooks/13_goose.ipynb`,
   2026-08-27
   Why: confirmed several mechanics not documented in `AGENTS.md`/`README.md`
   in enough detail to code against blind — standing on a `"LOCKED"` tile
@@ -200,7 +200,7 @@ function's docstring.
   buyer's inventory; and all held inventory is auto-dropped into the shed
   at `_end_of_day`, before positions/inventories reset. Source for
   `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_agent`
-  (validated in `notebooks/13_animals.ipynb`, tested in
+  (validated in `notebooks/13_goose.ipynb`, tested in
   `tests/test_baseline.py`): folds a goose/egg income stream into hand 4
   of `melon_then_wheat_agent`, beating it decisively (`win_rate=1.0`
   across two independent `evaluate()` calls). Two prior attempts logged

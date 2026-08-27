@@ -1046,7 +1046,7 @@ def test_goose_hand_picks_up_wheat_once_carrying_goose_and_shed_has_wheat():
 
 
 def test_goose_hand_does_not_stall_trying_to_pick_up_wheat_that_does_not_exist():
-    # Regression for the real bug found in notebooks/13_animals.ipynb:
+    # Regression for the real bug found in notebooks/13_goose.ipynb:
     # without the shed.get("WHEAT", 0) > 0 guard, this condition stayed
     # true forever (shed always 0 during the melon phase), permanently
     # blocking hand 4 at (4,4) instead of falling through to tend/move.
