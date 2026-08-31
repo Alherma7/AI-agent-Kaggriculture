@@ -633,6 +633,204 @@ real state of `src/` and `agent/main.py`.
     validated standalone against `melon_then_wheat_agent` the same way as
     prior graduations: `win_rate=1.0` across two independent calls
     (`avg_money` 29065.0, 28350.0). **Not yet submitted to Kaggle.**
+- 2026-08-31 — `notebooks/13_goose.ipynb`, extended: sell the `FERTILIZER`
+  the goose produces, following up on the gap noted 2026-08-27 (27 units
+  piled up unused in a Kaggle validation replay). Confirmed the same
+  accumulation locally first, via an instrumented episode tracking
+  `obs["private"]["shed"].get("FERTILIZER", 0)` turn by turn: reaches 27
+  around turn 710 and stays flat to the end of the game — never sold.
+  Confirmed `"FERTILIZER"` as the correct shed key by reading
+  `kaggriculture.py`'s `PRODUCTS` list directly, not assumed.
+  - Design decision (deliberately not copying the existing `SELL EGG`
+    placement): `EGG`'s sell check lives inside hand 4's own branch, only
+    reached when that hand has nothing else to do that turn (`op =
+    ["PASS"]`) — a theoretical risk if hand 4 were ever busy every single
+    turn, the sale would never fire. Placed `SELL FERTILIZER` instead next
+    to `WHEAT`/`MELON`'s checks at the farmer level, evaluated
+    unconditionally every turn, avoiding that dependency entirely.
+  - Validated in the notebook (local copy `_test_goose_fertilizer_agent`)
+    via `evaluate(_test_goose_melon_agent, _test_goose_fertilizer_agent,
+    n=10)` across two independent calls: `win_rate=0.0` for the
+    no-fertilizer-sale version both times (`avg_money` 23347.0 and
+    23394.0) — free money, as expected, no behavior tradeoff.
+  - Graduated in place into
+    `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_agent`
+    (same function name, two-line addition), 1 new unit test in
+    `tests/test_baseline.py` (`test_goose_sells_the_full_fertilizer_shed_every_turn`).
+    `RESOURCES.md` updated. Regenerated `agent/main.py` (`STRATEGY`
+    unchanged, only the body changed); `test_agent_dir_matches_generated_output`
+    still passes. **Not yet submitted to Kaggle.**
+- 2026-08-31 — `notebooks/14_cow.ipynb`: second animal, COW/MILK
+  (structure `PASTURE`), on hand 2. Decisions from chat before writing any
+  code: single species first (not COW+SHEEP together) -- reading
+  `kaggriculture.py` directly showed `_daily_refresh_animals` and the
+  `FEED`/`COLLECT_FERTILIZER`/`CARE`/`HARVEST` handlers are the same
+  function for `COOP`/`PASTURE`, so the only unproven thing was whether
+  `PASTURE` behaves the same; skipped the isolated mini-test stage goose
+  needed, going straight to a hand inside `melon_then_wheat_goose_agent`;
+  hand 2 repurposed for the cow (mirrors hand 4/goose, no new hire), since
+  all 13 free NW tiles were already claimed and `HAND_ZONES[2]`
+  (`(4,0)-(4,1)`, 2 tiles) was the only one left to sacrifice.
+  - `PASTURE_TILE = (4, 1)` (closer of the 2 former zone-2 tiles to the
+    shed) and `PASTURE_FEEDER` (a direct 3-step route, mirroring
+    `GOOSE_FEEDER`, added pre-emptively rather than waiting to see the same
+    turn-budget stall) both confirmed via mini-checks before writing the
+    hand logic.
+  - Three real bugs found and fixed while writing hand 2's block (typed by
+    the project owner, mirrored from hand 4's, not copy-pasted): checking
+    `hand_tile.get("kind") == "COW"` instead of `"PASTURE"` (a tile's
+    `kind` is the structure, not the animal); a stray unconditional
+    `op = ["PASS"]` left from the skeleton placeholder, silently
+    overwriting whatever the real branch above had just computed; and the
+    final `HARVEST`/`WATER` sub-block dedented out of its own
+    `elif ... kind == "PLANT":` branch, which would have raised
+    `NameError` (undefined `crop_age`/`threshold`) whenever hand 2 wasn't
+    standing on a `PLANT` tile.
+  - `SELL MILK` placed next to `WHEAT`/`MELON`/`FERTILIZER` (farmer level,
+    every turn) rather than gated on hand 2 being idle (the `EGG`
+    pattern) -- applying the same lesson learned earlier this session for
+    `FERTILIZER`.
+  - Validated via `evaluate(melon_then_wheat_goose_cow_agent,
+    melon_then_wheat_goose_agent, n=10)` across two independent calls in
+    the notebook: `win_rate=1.0` both times (`avg_money` 31831.0 and
+    31813.0). Confirmed via an instrumented episode this is the real
+    mechanism, not a money coincidence: `PASTURE` built turn 15 (day 0, no
+    turn-budget stall), `COW` placed turn 16, first `HARVEST` at step 206
+    (~day 8.6, matches `COW`'s `first_yield_day=8`), 31 total `HARVEST`
+    actions, 11 `SELL MILK` orders totaling 33 units sold, shed `MILK`
+    capping at 6 (`COW`'s `max_held`) and never overflowing.
+  - Graduated to
+    `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_cow_agent`
+    (re-validated post-graduation: `win_rate=1.0` across two more
+    independent `evaluate()` calls, `avg_money` 30541.0 and 31216.0), 16
+    new unit tests in `tests/test_baseline.py`. `RESOURCES.md` updated.
+    Wired into `agent/main.py` (`STRATEGY` switched); the generated file
+    validated standalone against `melon_then_wheat_goose_agent`.
+    **Not yet submitted to Kaggle.**
+
+- 2026-08-31 — Analyzed a real top-leaderboard replay,
+  `replays/103962387.json` (`ringbearer` 105735 vs `islet` 135063, both
+  far above our `melon_then_wheat_goose_cow_agent` ~31-32k). Reviewed and
+  explicitly rejected using `notebooks/kaggriculture-hamburger.ipynb` as a
+  starting point after decoding its packed `ANCHOR_BLOB` (not executed,
+  only base64/gzip-decoded for inspection): it's a literal, fixed
+  720-action replay of a named competitor's own past episode (`Tran H
+  Hoang`, episode `89674601`) that never reads `obs` — not a
+  generalizable strategy, and reusing another named competitor's exact
+  episode as a submission is the same thing `RESOURCES.md` already
+  flagged as not-a-source when this notebook was first reviewed. Stuck
+  with this project's established approach instead: infer generalizable
+  rules from replay action patterns, build our own version from the
+  engine.
+  - Action-count analysis (both seats, near-identical to each other —
+    strong "meta" signal, not an outlier): 4 crops (`WHEAT`, `MELON`,
+    `CARROT`, `STRAWBERRY`), `COW`+`SHEEP` (no `GOOSE` early, though
+    `BUILD_COOP` appears a few times late), `FERTILIZE` actually applied
+    (62-70 times) not just sold, a new-to-us action `DIG` (42-43 times —
+    confirmed via `kaggriculture.py`: clears a tile — plant, weed, or
+    empty `COOP`/`PASTURE`, not a placed animal — back to `None`),
+    `BUY_PRODUCT FERTILIZER` (buying it directly, not just collecting
+    from animals), manual `DROP` (15-42 times), land bought twice (`NE`
+    then `SW`) at the *same step* for both seats (151, 266 → day 6, day
+    11) regardless of each seat's own money, and 11-12 hands (vs. our
+    cap of 8).
+  - Per-hand crop breakdown then chronological first-occurrence timeline
+    (both by day, nearly identical between seats) revealed the real
+    priority, overriding an initial by-eye guess: `CARROT` is planted
+    only 1-4 times per hand across the *entire* game, scattered with no
+    fixed zone, first planting as late as day 21-25 — genuinely marginal,
+    not a real pillar. `STRAWBERRY` (`ongoing: True`) is used broadly and
+    consistently (1-8 plantings per hand, each tile planted once since it
+    keeps producing) and appears far earlier, day 5. `WHEAT` dominates
+    everywhere as the constantly-replanted filler crop (`ongoing: False`,
+    tiles replanted 6-10+ times each). Full day-by-day first-occurrence
+    table (both seats near-identical): day 0 — seed `WHEAT`+`MELON`,
+    `HIRE`, buy `COW`+`SHEEP`, `BUILD_PASTURE`, place `COW`, plant
+    `MELON`, place `SHEEP`, plant `WHEAT`; day 1 — sell `FERTILIZER`
+    (from animals); day 4 — buy `CARROT`+`STRAWBERRY` seed; day 5 — plant
+    `STRAWBERRY`; day 6 — sell `WOOL`, buy land, buy `FERTILIZER`
+    product; day 7-12 — first `DIG`; day 8 — sell `MILK`; day 10 — sell
+    `MELON`, `BUILD_COOP`; day 14 — first `FERTILIZE` (applied); day
+    15-16 — sell `STRAWBERRY`; day 21-25 — plant `CARROT`; day 28 — sell
+    `CARROT`, first `DROP`.
+  - **New build roadmap, in this replay-derived order** (revises the
+    original by-eye priority guess), started in
+    `notebooks/15_leaderboard_agent.ipynb`, one increment at a time, each
+    validated against the previous best before the next starts (same
+    discipline as every prior notebook — mixing changes makes a
+    regression impossible to attribute, per the 2026-08-22
+    `08_melon_hand.ipynb` lesson): (1) `STRAWBERRY`, (2) land + more
+    hands on a fixed day schedule (moved up — opens NW-adjacent room
+    `SHEEP` needs), (3) `SHEEP` (placed on the new NE land instead of
+    stealing another NW zone), (4) `FERTILIZE` applied, (5) `DIG`, (6)
+    `CARROT` (kept last and light, matching how marginal it is for real
+    top players). Note: the replay builds `GOOSE`/`COOP` late (day 10);
+    we keep our own day-0 `GOOSE` as-is rather than rework a validated
+    win purely for order fidelity.
+- 2026-08-31 — `notebooks/15_leaderboard_agent.ipynb`, roadmap step 1:
+  `STRAWBERRY`, built and graduated in two stages, both Socratically
+  mentored (project owner wrote every line, chat guided/reviewed) except
+  the final graduation pass, which the project owner explicitly handed
+  over ("hazlo tu todo, avisame cuando pueda subir el agent").
+  1. `_tile_action`: extracted the per-tile `HARVEST`/`WATER`/`PLANT`
+     decision, previously duplicated 4x inline (farmer, hand 2/4's
+     transit tiles, hands 0/1/3's zone tiles), into one shared function —
+     each new roadmap item now changes in one place instead of four.
+     Re-validated as a pure no-op first: `win_rate=0.5` (an exact tie)
+     against `melon_then_wheat_goose_cow_agent`.
+  2. Ongoing-crop support (`STRAWBERRY`) plus a watering-window fix for
+     `WHEAT`/`MELON`, from reading `kaggriculture.py` directly (see
+     `RESOURCES.md`'s new entry for the full mechanics: `_new_plant`'s
+     free `yield_units`, the `WATER` handler's bonus window, `ongoing`
+     crops' `_daily_refresh_plants` schedule). First attempt at
+     maximizing `WHEAT`/`MELON`'s bonus window (harvest at
+     `crop_age > max_yield_day`) was a real regression — diagnosed by an
+     Opus-run instrumented, seeded A/B (10 fixed seeds, project owner's
+     explicit "use Opus" call) rather than guessed: that threshold is the
+     exact step the engine's `_decay_plants` starts converting the tile
+     to `WEED` (`max_lifespan_step`), and `_tile_action` had no `WEED`
+     branch, losing 20/25 tiles permanently; a second-order bug (longer
+     `WHEAT` cycle outran the `BUY_PRODUCT WHEAT` backstop's `day < 10`
+     cutoff, starving and losing the cow) compounded it. Fix, both parts
+     required together: harvest at `crop_age >= max_yield_day` (not
+     `>`), backstop extended to `day < 13`.
+  `STRAWBERRY_TILE = (0, 1)`, a single fixed tile in `HAND_ZONES[0]`,
+  planted once and left alone — deliberately minimal since an `ongoing`
+  tile never clears after `HARVEST` (dead weight after `max_yield=4`
+  units, ~day 16-18, until `DIG` exists to reclaim it — roadmap step 5,
+  not built yet).
+  Validated via `evaluate(melon_then_wheat_goose_cow_agent,
+  melon_then_wheat_goose_cow_strawberry_agent, n=10)` across two
+  independent calls in the notebook: `win_rate=0.0` for the baseline both
+  times (`avg_money` 31778.0 and 29762.0 for the losing side). Graduated
+  to
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_cow_strawberry_agent`
+  (re-validated post-graduation via the generated `agent/main.py` file
+  standalone: `win_rate=0.0` across two more independent calls, `avg_money`
+  31405.0 and 31360.0), 21 new unit tests in `tests/test_baseline.py`
+  (`_tile_action`'s ongoing/non-ongoing branches directly, `CROP_INFO`,
+  and the graduated agent's `STRAWBERRY`-specific behavior, including a
+  regression test for a real bug caught live while writing this: the
+  `STRAWBERRY_TILE` branch must gate on `STRAWBERRY`'s own seed count,
+  not `crop_to_plant`'s). `RESOURCES.md` updated (two new entries: the
+  replay/roadmap/refactor rationale, and the engine-mechanics/Opus-diagnosis
+  one).
+  Also fixed a real gap in `scripts/build_agent.py` while graduating:
+  it only ever collected same-module top-level *constants* referenced by
+  the strategy function (added 2026-08-19, see that log entry), never
+  same-module top-level *functions* — irrelevant for every strategy so
+  far (self-contained bodies), but `melon_then_wheat_goose_cow_strawberry_agent`
+  calls `_tile_action`, so generating without a fix would have shipped an
+  `agent/main.py` that crashed with `NameError` on its first tile-tending
+  turn (and separately would have dropped `CROP_INFO`, since it's
+  referenced only inside `_tile_action`, never in the strategy function's
+  own body). Added `_top_level_functions`/`_referenced_function_block`
+  (mirrors the constants version, same transitive-closure approach), and
+  made the constants scan also cover any included helper functions' own
+  source, not just the strategy function's. 5 new unit tests in
+  `tests/test_build_agent.py`. Wired into `agent/main.py` (`STRATEGY`
+  switched); `test_agent_dir_matches_generated_output` passes. **Not yet
+  submitted to Kaggle.**
 
 ## Next steps
 
@@ -769,6 +967,18 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       runs. Wired into `agent/main.py`, not yet submitted to Kaggle.
       Cow/sheep (pasture, interval-based production) not yet built —
       `COOP`/`PASTURE` are structurally the same, should generalize.
+- [x] **Animals (second increment: cow/milk)** — hand 2 repurposed
+      (mirrors hand 4/goose, no new hire), graduated as
+      `melon_then_wheat_goose_cow_agent` (see 2026-08-31 log entry).
+      Confirmed via engine source that `COOP`/`PASTURE` share the same
+      production/tending mechanics, as anticipated above. Beats
+      `melon_then_wheat_goose_agent` decisively, `win_rate=1.0` across four
+      independent runs (two pre-graduation, two post). Wired into
+      `agent/main.py`, not yet submitted to Kaggle.
+      Sheep not yet built — should be cheap now that `PASTURE` is proven
+      (swap `COW`/`MILK` for `SHEEP`/`WOOL`, same mechanism), but needs its
+      own hand/tile — no free NW zone left to sacrifice a third time
+      without NE land.
 - [ ] **Combine the goose with `melon_then_wheat_extra_hands_agent`'s
       NE land + extra hands (5/6/7)** — `melon_then_wheat_goose_agent`
       was deliberately built on plain `melon_then_wheat_agent` (2026-08-27
@@ -779,25 +989,45 @@ previous one has cleared `evaluate.py`'s gate and been logged here.
       hand 4's `GOOSE_FEEDER` route is a direct 2-step path, independent
       of hands 5/6/7's NE zones, so it shouldn't reopen the turn-budget
       problem that sank the first (9-hand) goose attempt.
-- [ ] **Sell (or apply) the `FERTILIZER` the goose produces** — noticed
-      2026-08-27 via a Kaggle validation-replay screenshot showing 27
-      units piled up unused. `melon_then_wheat_goose_agent` already does
-      `COLLECT_FERTILIZER` (into hand 4's inventory, auto-dropped to the
-      shed at day's end per `_drop_inventories_to_shed`) but never sells
-      or uses it after that — confirmed by reading the engine directly:
-      `FERTILIZE` (consumes 1 from the *acting unit's own* inventory,
-      standing on a `PLANT` tile) doubles that tile's harvest yield for
-      the next 3 days (`fertilized_until_day`); alternatively a plain
-      `SELL FERTILIZER` order, same as `WHEAT`/`MELON` (the v5 opponent,
-      `Saravana Thiagarajan K`, sold 206 units this way with no animal
-      product involved). Selling is the simpler first step -- one more
-      `market.append` next to the existing `SELL WHEAT`/`SELL MELON`
-      lines. Using `FERTILIZE` is more involved since hand 4 no longer
-      tends any crop tile of its own (it goes straight to the coop via
-      `GOOSE_FEEDER`) -- would need to hand the item to another unit.
+- [x] **Sell the `FERTILIZER` the goose produces** — noticed 2026-08-27
+      via a Kaggle validation-replay screenshot showing 27 units piled up
+      unused. Built and graduated 2026-08-31 (see log entry): a plain
+      `SELL FERTILIZER` order next to the existing `SELL WHEAT`/`SELL
+      MELON` checks, evaluated every turn rather than gated on hand 4
+      having nothing else to do. Beats the no-sale version 10/10 across
+      two independent runs. Regenerated `agent/main.py`, not yet
+      submitted to Kaggle.
+      Still open: using `FERTILIZE` itself (doubles a tile's harvest yield
+      for 3 days) instead of just selling — more involved, since hand 4 no
+      longer tends any crop tile of its own (goes straight to the coop via
+      `GOOSE_FEEDER`), so it would need to hand the item to another unit.
 - [ ] Buy land only when projected ROI beats the cost ($1k/$2k/$4k) —
       note HechtJP never bought land in the replay we studied, stayed in
       the free NW quadrant the whole game
+
+### Level 2.5 — Leaderboard-replay-driven roadmap (`notebooks/15_leaderboard_agent.ipynb`)
+
+Derived from replay `103962387.json` (`ringbearer`/`islet`, ~105-135k,
+both far above our current best) — see the 2026-08-31 log entry above for
+the full analysis and reasoning. One increment at a time, each validated
+against the previous best before the next starts.
+
+- [x] `STRAWBERRY` (`ongoing: True` crop) — water-and-harvest-together
+      logic via `_tile_action`, a single fixed `STRAWBERRY_TILE`. See the
+      2026-08-31 log entry. Graduated as
+      `melon_then_wheat_goose_cow_strawberry_agent`. Also fixed a
+      pre-existing watering-window suboptimality in `WHEAT`/`MELON`
+      harvest timing while building this (see `RESOURCES.md`).
+- [ ] Land + more hands on a fixed day schedule (replay: both seats buy
+      `NE` the same step regardless of money) — moved up from "last" so
+      `SHEEP` has NE tiles to use.
+- [ ] `SHEEP` (second `PASTURE` animal, on the new NE land).
+- [ ] `FERTILIZE` applied (not just sold, per the 2026-08-31 `FERTILIZER`
+      work earlier this session).
+- [ ] `DIG` (clears a tile — plant/weed/empty structure — back to
+      `None`; reclaims `WEED` tiles).
+- [ ] `CARROT` — kept last and light; genuinely marginal even for the
+      real top players analyzed (1-4 plantings per hand, whole game).
 
 ### Level 3 — Turn-by-turn planning
 

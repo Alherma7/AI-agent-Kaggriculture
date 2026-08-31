@@ -916,6 +916,18 @@ SHED_ADJACENT = {(4, 4), (5, 4), (4, 5), (5, 5)}
 # missing the coop that day entirely; see the function docstring below.
 GOOSE_FEEDER = {(4, 4): (4, 3), (4, 3): (4, 2), (4, 2): (4, 2)}
 
+# Second animal (COW/MILK, structure PASTURE) for melon_then_wheat_goose_cow_agent
+# -- notebooks/14_cow.ipynb. No free NW tile was left for a second structure
+# (all 13 already claimed by HAND_ZONES[0..4]/GOOSE_TILE), so hand 2's own
+# zone ((4,0)-(4,1)) is the one sacrificed this time -- same "repurpose an
+# existing hand" pattern as hand 4/goose, not a new hire. (4,1) is the closer
+# of its 2 former tiles to the shed. PASTURE_FEEDER mirrors GOOSE_FEEDER's
+# direct route, pre-emptively avoiding the turn-budget problem that forced
+# GOOSE_FEEDER in the first place (confirmed in the notebook trace: hand 2
+# reaches PASTURE_TILE by turn 15, no stall).
+PASTURE_TILE = (4, 1)
+PASTURE_FEEDER = {(4, 4): (4, 3), (4, 3): (4, 2), (4, 2): (4, 1), (4, 1): (4, 1)}
+
 
 def melon_then_wheat_goose_agent(obs):
     """melon_then_wheat_agent extended with a goose/egg income stream on
@@ -1084,10 +1096,13 @@ def melon_then_wheat_goose_agent(obs):
 
     wheat_in_shed = obs["private"]["shed"].get("WHEAT", 0)
     melon_in_shed = obs["private"]["shed"].get("MELON", 0)
+    fertilizer_in_shed = obs["private"]["shed"].get("FERTILIZER", 0)
     if wheat_in_shed > 1:
-        market.append(["SELL", "WHEAT", wheat_in_shed - 1])
+        market.append(["SELL", "WHEAT", wheat_in_shed -1])
     if melon_in_shed > 0:
         market.append(["SELL", "MELON", melon_in_shed])
+    if fertilizer_in_shed > 0:
+        market.append(["SELL", "FERTILIZER", fertilizer_in_shed])
 
     if tile is None and crop_seeds > 0:
         farmer = ["PLANT", crop_to_plant]
@@ -1102,5 +1117,483 @@ def melon_then_wheat_goose_agent(obs):
             farmer = [direction]
     else:
         farmer = [direction]
+
+    return {"farmer": farmer, "hands": hands, "market": market}
+
+
+def melon_then_wheat_goose_cow_agent(obs):
+    """melon_then_wheat_goose_agent extended with a second animal, COW/MILK
+    (structure PASTURE), on hand 2 -- notebooks/14_cow.ipynb.
+
+    Single species first (COW, not COW+SHEEP together): reading
+    kaggriculture.py directly showed _daily_refresh_animals and the
+    FEED/COLLECT_FERTILIZER/CARE/HARVEST action handlers are the same
+    function for COOP and PASTURE -- only interval/first_yield_day/max_held
+    differ in the ANIMALS table, and the agent's own logic never reads those
+    directly (unlike crop harvest thresholds, hardcoded per crop). So the
+    only genuinely new, unproven thing was whether PASTURE behaves the same
+    as COOP -- worth isolating with one species before a second (SHEEP,
+    still unbuilt) that should be cheap once this one works. The isolated
+    mini-test stage goose went through was skipped for this reason -- the
+    engine-source read already de-risked most of the mechanism.
+
+    Hand 2 is repurposed for the cow, same "no new hire" pattern as hand 4
+    for the goose -- HAND_ZONES[2] ((4,0)-(4,1)) is the zone sacrificed for
+    PASTURE_TILE, since all 13 free NW tiles were already claimed by
+    HAND_ZONES[0..4]/GOOSE_TILE and there was no room left. SELL MILK is
+    checked every turn next to WHEAT/MELON/FERTILIZER (farmer level,
+    unconditional) rather than gated on hand 2 having nothing else to do --
+    the lesson from the FERTILIZER addition earlier this session (the EGG
+    pattern risks never selling if the hand is always busy).
+
+    Real bugs found and fixed while writing hand 2's block (mirrored from
+    hand 4's, not written from scratch): `hand_tile.get("kind") == "COW"`
+    instead of `"PASTURE"` (a tile's `kind` is the structure, not the
+    animal -- checked via `tile.get("animal")` instead); a stray unconditional
+    `op = ["PASS"]` left over from the skeleton placeholder, overwriting
+    whatever the real branch above it had just computed; and the final
+    HARVEST/WATER sub-block dedented out of its own `elif ... kind ==
+    "PLANT":` branch, turning it into an unconditional block that would have
+    raised NameError (undefined crop_age/threshold) whenever hand 2 wasn't
+    standing on a PLANT tile.
+
+    Validated in notebooks/14_cow.ipynb via evaluate(melon_then_wheat_goose_cow_agent,
+    melon_then_wheat_goose_agent, n=10) across two independent calls:
+    win_rate=1.0 both times (avg_money 31831.0 and 31813.0). Confirmed via an
+    instrumented episode that this is the real mechanism, not just a money
+    coincidence: PASTURE built turn 15 (day 0, no turn-budget stall), COW
+    placed turn 16, first HARVEST at step 206 (~day 8.6, matches COW's
+    first_yield_day=8), 31 total HARVEST actions, 11 SELL MILK orders
+    totaling 33 units sold, shed MILK capping at 6 (COW's max_held) and never
+    overflowing.
+    """
+    crop_to_plant = "MELON" if obs["day"] < 10 else "WHEAT"
+    crop_seeds = obs["private"]["seeds"].get(crop_to_plant, 0)
+
+    market = []
+    hands = []
+
+    if obs["step"] == 0:
+        market.append(["BUY_ANIMAL", "GOOSE", 1])
+        market.append(["BUY_ANIMAL", "COW", 1])
+    if obs["day"] < 10 and obs["private"]["shed"].get("WHEAT", 0) == 0:
+        market.append(["BUY_PRODUCT", "WHEAT", 1])
+
+    for i, (hx, hy) in enumerate(obs["farms"][obs["player"]]["hands"]):
+        if i == 4:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **GOOSE_FEEDER}
+        elif i == 2:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **PASTURE_FEEDER}
+        else:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **HAND_ZONES[i % len(HAND_ZONES)]}
+        target_x, target_y = hand_loop[(hx, hy)]
+        if (target_x, target_y) == (hx, hy):
+            move = ["PASS"]
+        else:
+            move = [DIRECTIONS[(target_x - hx, target_y - hy)]]
+
+        hand_tile = obs["farms"][obs["player"]]["tiles"][hy][hx]
+
+        if i == 4:
+            hand_inventory = obs["private"]["inventories"][i + 1]
+
+            if (hx, hy) == GOOSE_TILE:
+                # At the coop.
+                if hand_tile is None:
+                    op = ["BUILD_COOP"]
+                elif hand_tile.get("kind") == "COOP" and hand_tile.get("animal") != "GOOSE":
+                    if hand_inventory.get("GOOSE", 0) > 0:
+                        op = ["PLACE", "GOOSE", 1]
+                    else:
+                        op = ["PASS"]
+                elif hand_inventory.get("WHEAT", 0) > 0 and not hand_tile.get("fed_today"):
+                    op = ["FEED"]
+                elif hand_tile.get("fertilizer_available"):
+                    op = ["COLLECT_FERTILIZER"]
+                elif not hand_tile.get("cared_today"):
+                    op = ["CARE"]
+                elif hand_tile.get("yield_units", 0) > 0:
+                    op = ["HARVEST"]
+                else:
+                    op = ["PASS"]
+                    egg_in_shed = obs["private"]["shed"].get("EGG", 0)
+                    if egg_in_shed > 0:
+                        market.append(["SELL", "EGG", egg_in_shed])
+            else:
+                # Not at the coop yet: pickup priority (GOOSE, then
+                # WHEAT), only possible while shed-adjacent; otherwise
+                # tend whatever tile it's standing on, same as hands 0-3.
+                if hand_tile == "LOCKED":
+                    op = move
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("GOOSE", 0) == 0 and obs["private"]["shed"].get("GOOSE", 0) > 0:
+                    op = ["PICKUP", "GOOSE", 1]
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("WHEAT", 0) == 0 and obs["private"]["shed"].get("WHEAT", 0) > 0:
+                    op = ["PICKUP", "WHEAT", 1]
+                elif hand_tile is None and crop_seeds > 0:
+                    op = ["PLANT", crop_to_plant]
+                elif hand_tile is not None and hand_tile.get("kind") == "PLANT":
+                    crop_age = obs["day"] - hand_tile["planted_day"]
+                    threshold = 10 if hand_tile["crop"] == "MELON" else 2
+                    if crop_age >= threshold:
+                        op = ["HARVEST"]
+                    elif not hand_tile.get("watered_today"):
+                        op = ["WATER"]
+                    else:
+                        op = move
+                else:
+                    op = move
+        elif i == 2:
+            hand_inventory = obs["private"]["inventories"][i + 1]
+
+            if (hx, hy) == PASTURE_TILE:
+                # At the pasture.
+                if hand_tile is None:
+                    op = ["BUILD_PASTURE"]
+                elif hand_tile.get("kind") == "PASTURE" and hand_tile.get("animal") != "COW":
+                    if hand_inventory.get("COW", 0) > 0:
+                        op = ["PLACE", "COW", 1]
+                    else:
+                        op = ["PASS"]
+                elif hand_inventory.get("WHEAT", 0) > 0 and not hand_tile.get("fed_today"):
+                    op = ["FEED"]
+                elif hand_tile.get("fertilizer_available"):
+                    op = ["COLLECT_FERTILIZER"]
+                elif not hand_tile.get("cared_today"):
+                    op = ["CARE"]
+                elif hand_tile.get("yield_units", 0) > 0:
+                    op = ["HARVEST"]
+                else:
+                    op = ["PASS"]
+            else:
+                # Not at the pasture yet: pickup priority (COW, then
+                # WHEAT), only possible while shed-adjacent; otherwise
+                # tend whatever tile it's standing on, same as hands 0/1/3.
+                if hand_tile == "LOCKED":
+                    op = move
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("COW", 0) == 0 and obs["private"]["shed"].get("COW", 0) > 0:
+                    op = ["PICKUP", "COW", 1]
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("WHEAT", 0) == 0 and obs["private"]["shed"].get("WHEAT", 0) > 0:
+                    op = ["PICKUP", "WHEAT", 1]
+                elif hand_tile is None and crop_seeds > 0:
+                    op = ["PLANT", crop_to_plant]
+                elif hand_tile is not None and hand_tile.get("kind") == "PLANT":
+                    crop_age = obs["day"] - hand_tile["planted_day"]
+                    threshold = 10 if hand_tile["crop"] == "MELON" else 2
+                    if crop_age >= threshold:
+                        op = ["HARVEST"]
+                    elif not hand_tile.get("watered_today"):
+                        op = ["WATER"]
+                    else:
+                        op = move
+                else:
+                    op = move
+        elif hand_tile == "LOCKED" or (hx, hy) not in HAND_ZONES[i % len(HAND_ZONES)]:
+            op = move
+        elif hand_tile is None and crop_seeds > 0:
+            op = ["PLANT", crop_to_plant]
+        elif hand_tile is not None and hand_tile.get("kind") == "PLANT":
+            crop_age = obs["day"] - hand_tile["planted_day"]
+            threshold = 10 if hand_tile["crop"] == "MELON" else 2
+            if crop_age >= threshold:
+                op = ["HARVEST"]
+            elif not hand_tile.get("watered_today"):
+                op = ["WATER"]
+            else:
+                op = move
+        else:
+            op = move
+        hands.append(op)
+
+    if len(obs["farms"][obs["player"]]["hands"]) < 5:
+        market.append(["HIRE"])
+
+    if obs["step"] == 0 or crop_seeds <= 5:
+        market.append(["BUY_SEED", crop_to_plant, 6 - crop_seeds])
+
+    farmer_pos = obs["farms"][obs["player"]]["farmer"]
+    x, y = farmer_pos
+    target_x, target_y = LOOP_ORDER_12[(x, y)]
+    direction = DIRECTIONS[(target_x - x, target_y - y)]
+
+    tile = obs["farms"][obs["player"]]["tiles"][y][x]
+
+    wheat_in_shed = obs["private"]["shed"].get("WHEAT", 0)
+    melon_in_shed = obs["private"]["shed"].get("MELON", 0)
+    fertilizer_in_shed = obs["private"]["shed"].get("FERTILIZER", 0)
+    milk_in_shed = obs["private"]["shed"].get("MILK", 0)
+    if wheat_in_shed > 1:
+        market.append(["SELL", "WHEAT", wheat_in_shed - 1])
+    if melon_in_shed > 0:
+        market.append(["SELL", "MELON", melon_in_shed])
+    if fertilizer_in_shed > 0:
+        market.append(["SELL", "FERTILIZER", fertilizer_in_shed])
+    if milk_in_shed > 0:
+        market.append(["SELL", "MILK", milk_in_shed])
+
+    if tile is None and crop_seeds > 0:
+        farmer = ["PLANT", crop_to_plant]
+    elif tile is not None and tile.get("kind") == "PLANT":
+        crop_age = obs["day"] - tile["planted_day"]
+        threshold = 10 if tile["crop"] == "MELON" else 2
+        if crop_age >= threshold:
+            farmer = ["HARVEST"]
+        elif not tile.get("watered_today"):
+            farmer = ["WATER"]
+        else:
+            farmer = [direction]
+    else:
+        farmer = [direction]
+
+    return {"farmer": farmer, "hands": hands, "market": market}
+
+
+# -- melon_then_wheat_goose_cow_strawberry_agent -------------------------
+#
+# First increment toward the leaderboard-replay roadmap (PROGRESS.md,
+# 2026-08-31; notebooks/15_leaderboard_agent.ipynb), triggered by a real
+# top-leaderboard replay (replays/103962387.json, ringbearer/islet, both
+# ~105-135k vs our ~31-32k). Adds STRAWBERRY, an `ongoing` crop -- built in
+# two stages, both validated via evaluate.py:
+#
+# 1. `_tile_action` -- extracted the per-tile HARVEST/WATER/PLANT decision
+#    that was previously duplicated 4x inline (farmer, hand 2's/hand 4's
+#    transit tiles, hands 0/1/3's zone tiles) into one shared function, so
+#    each new crop mechanic only needs to change in one place. Re-validated
+#    as a pure no-op refactor first (win_rate=0.5, a tie, against
+#    melon_then_wheat_goose_cow_agent) before adding any new behavior.
+#
+# 2. Ongoing-crop support + a watering-window fix for WHEAT/MELON too, from
+#    reading kaggriculture.py directly (not assumed):
+#    - `_new_plant` grants 1 free `yield_units` at planting for non-ongoing
+#      crops; the `WATER` handler grants a bonus `yield_units` (1, or 2 if
+#      fertilized) each day watered while `age_days` falls in the inclusive
+#      window `[(max_yield_day+1)//2, max_yield_day]`, capped at
+#      `max_yield`. `HARVEST` requires `yield_units > 0`.
+#    - For `ongoing` crops (STRAWBERRY here), `_daily_refresh_plants`
+#      accumulates `yield_units` on a fixed schedule (`interval` days after
+#      `first_yield_day`, capped at `max_yield`) regardless of the WATER
+#      action; the tile never clears after `HARVEST`. Watering is still
+#      required daily (2 consecutive unwatered days -> WEED), so
+#      `_tile_action` waters before checking whether to harvest for
+#      `ongoing` crops -- otherwise a `crop_age >= threshold` check (like
+#      non-ongoing crops use) would starve watering forever once the crop
+#      is first ready, killing the plant.
+#    - First attempt at capturing the WATER bonus window for WHEAT/MELON
+#      (wait until `crop_age > max_yield_day` before harvesting) was a real
+#      regression, diagnosed by an Opus-run instrumented, seeded A/B (10
+#      fixed seeds, reproducible; project owner's explicit "use Opus" call
+#      for this diagnosis) rather than guessed: `crop_age > max_yield_day`
+#      first becomes true on the exact step `_decay_plants` starts
+#      converting the tile toward `WEED` (engine:
+#      `max_lifespan_step = (planted_day + max_yield_day + 1) * turns_per_day`),
+#      and `_tile_action` has no `WEED` branch, so a tile that decays before
+#      the unit's next visit is lost forever (20/25 tiles weeded in the
+#      losing variant, vs. 2/25 for the baseline). A second-order bug
+#      compounded it: the longer WHEAT cycle delayed the first WHEAT
+#      harvest from day ~12-13 to ~14-15, so the `BUY_PRODUCT WHEAT`
+#      backstop (which stopped at `day < 10`) left the shed empty days
+#      11-14, starving the cow (it escapes after 2 unfed days, never
+#      replaced -- `BUY_ANIMAL` is step-0 only). Fix, both parts required
+#      together (validated on the same 10 seeds): harvest at
+#      `crop_age >= max_yield_day` (not `>`) so harvest always fires before
+#      decay starts, and extend the `BUY_PRODUCT WHEAT` backstop to
+#      `day < 13` to cover the now-longer gap. Ruled out (not the
+#      mechanism): market-price crashing from bursty sells (WHEAT sale
+#      prices were identical between variants at every sell) and hand
+#      2/4's opportunistic transit-tile tending (the pure refactor's exact
+#      bit-for-bit tie already showed that wiring is unchanged).
+#
+# STRAWBERRY placement: a single fixed tile, STRAWBERRY_TILE = (0, 1) (one
+# of HAND_ZONES[0]'s tiles), planted once and left alone from then on --
+# matches the replay's own usage (mixed a handful of times into hands'
+# existing zones, not a dedicated hand) and deliberately minimal, since an
+# `ongoing` tile never clears after harvest: once STRAWBERRY's max_yield=4
+# lifetime units are collected (~day 16-18), that tile is dead weight for
+# the rest of the game until `DIG` exists (roadmap step 5, not built yet)
+# to reclaim it. `_tile_action` isn't told which crop a tile "should" be --
+# each call site decides its own (crop, seed-count) pair to pass in, so
+# `_tile_action` stays a pure "given this tile and this chosen crop, what's
+# the action" function, agnostic to placement policy (which will keep
+# growing: CARROT, roadmap step 6, needs a different, scattered rule).
+#
+# Validated via evaluate(melon_then_wheat_goose_cow_agent,
+# melon_then_wheat_goose_cow_strawberry_agent, n=10) across two independent
+# calls: win_rate=0.0 for the baseline both times (avg_money 31778.0 and
+# 29762.0 for the losing side).
+
+CROP_INFO = {
+    "WHEAT": {"ongoing": False, "max_yield_day": 4, "max_yield": 6},
+    "MELON": {"ongoing": False, "max_yield_day": 12, "max_yield": 6},
+    "STRAWBERRY": {"ongoing": True},
+}
+STRAWBERRY_TILE = (0, 1)
+
+
+def _tile_action(tile, fallback, crop_seeds, crop_to_plant, obs):
+    if tile is None and crop_seeds > 0:
+        action = ["PLANT", crop_to_plant]
+    elif tile is not None and tile.get("kind") == "PLANT":
+        crop_age = obs["day"] - tile["planted_day"]
+        ongoing_crop = CROP_INFO[tile["crop"]]["ongoing"]
+        if ongoing_crop:
+            if not tile.get("watered_today"):
+                action = ["WATER"]
+            elif tile.get("yield_units", 0) > 0:
+                action = ["HARVEST"]
+            else:
+                action = fallback
+        else:
+            max_yield_day = CROP_INFO[tile["crop"]]["max_yield_day"]
+            max_yield = CROP_INFO[tile["crop"]]["max_yield"]
+            if crop_age >= max_yield_day or tile.get("yield_units", 0) >= max_yield:
+                action = ["HARVEST"]
+            elif not tile.get("watered_today"):
+                action = ["WATER"]
+            else:
+                action = fallback
+    else:
+        action = fallback
+    return action
+
+
+def melon_then_wheat_goose_cow_strawberry_agent(obs):
+    """melon_then_wheat_goose_cow_agent extended with STRAWBERRY, an
+    ongoing crop, on a single fixed tile -- notebooks/15_leaderboard_agent.ipynb.
+    See the module-level comment block just above CROP_INFO for the full
+    account (the _tile_action refactor, the ongoing-crop mechanics, the
+    watering-window regression and its Opus-diagnosed fix, and the
+    STRAWBERRY_TILE placement rationale).
+    """
+    crop_to_plant = "MELON" if obs["day"] < 10 else "WHEAT"
+    crop_seeds = obs["private"]["seeds"].get(crop_to_plant, 0)
+    strawberry_seeds = obs["private"]["seeds"].get("STRAWBERRY", 0)
+
+    market = []
+    hands = []
+
+    if obs["step"] == 0:
+        market.append(["BUY_ANIMAL", "GOOSE", 1])
+        market.append(["BUY_ANIMAL", "COW", 1])
+        market.append(["BUY_SEED", "STRAWBERRY", 1])
+    if obs["day"] < 13 and obs["private"]["shed"].get("WHEAT", 0) == 0:
+        market.append(["BUY_PRODUCT", "WHEAT", 1])
+
+    for i, (hx, hy) in enumerate(obs["farms"][obs["player"]]["hands"]):
+        if i == 4:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **GOOSE_FEEDER}
+        elif i == 2:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **PASTURE_FEEDER}
+        else:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **HAND_ZONES[i % len(HAND_ZONES)]}
+        target_x, target_y = hand_loop[(hx, hy)]
+        if (target_x, target_y) == (hx, hy):
+            move = ["PASS"]
+        else:
+            move = [DIRECTIONS[(target_x - hx, target_y - hy)]]
+
+        hand_tile = obs["farms"][obs["player"]]["tiles"][hy][hx]
+
+        if i == 4:
+            hand_inventory = obs["private"]["inventories"][i + 1]
+
+            if (hx, hy) == GOOSE_TILE:
+                if hand_tile is None:
+                    op = ["BUILD_COOP"]
+                elif hand_tile.get("kind") == "COOP" and hand_tile.get("animal") != "GOOSE":
+                    if hand_inventory.get("GOOSE", 0) > 0:
+                        op = ["PLACE", "GOOSE", 1]
+                    else:
+                        op = ["PASS"]
+                elif hand_inventory.get("WHEAT", 0) > 0 and not hand_tile.get("fed_today"):
+                    op = ["FEED"]
+                elif hand_tile.get("fertilizer_available"):
+                    op = ["COLLECT_FERTILIZER"]
+                elif not hand_tile.get("cared_today"):
+                    op = ["CARE"]
+                elif hand_tile.get("yield_units", 0) > 0:
+                    op = ["HARVEST"]
+                else:
+                    op = ["PASS"]
+                    egg_in_shed = obs["private"]["shed"].get("EGG", 0)
+                    if egg_in_shed > 0:
+                        market.append(["SELL", "EGG", egg_in_shed])
+            else:
+                if hand_tile == "LOCKED":
+                    op = move
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("GOOSE", 0) == 0 and obs["private"]["shed"].get("GOOSE", 0) > 0:
+                    op = ["PICKUP", "GOOSE", 1]
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("WHEAT", 0) == 0 and obs["private"]["shed"].get("WHEAT", 0) > 0:
+                    op = ["PICKUP", "WHEAT", 1]
+                else:
+                    op = _tile_action(hand_tile, move, crop_seeds, crop_to_plant, obs)
+        elif i == 2:
+            hand_inventory = obs["private"]["inventories"][i + 1]
+
+            if (hx, hy) == PASTURE_TILE:
+                if hand_tile is None:
+                    op = ["BUILD_PASTURE"]
+                elif hand_tile.get("kind") == "PASTURE" and hand_tile.get("animal") != "COW":
+                    if hand_inventory.get("COW", 0) > 0:
+                        op = ["PLACE", "COW", 1]
+                    else:
+                        op = ["PASS"]
+                elif hand_inventory.get("WHEAT", 0) > 0 and not hand_tile.get("fed_today"):
+                    op = ["FEED"]
+                elif hand_tile.get("fertilizer_available"):
+                    op = ["COLLECT_FERTILIZER"]
+                elif not hand_tile.get("cared_today"):
+                    op = ["CARE"]
+                elif hand_tile.get("yield_units", 0) > 0:
+                    op = ["HARVEST"]
+                else:
+                    op = ["PASS"]
+            else:
+                if hand_tile == "LOCKED":
+                    op = move
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("COW", 0) == 0 and obs["private"]["shed"].get("COW", 0) > 0:
+                    op = ["PICKUP", "COW", 1]
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("WHEAT", 0) == 0 and obs["private"]["shed"].get("WHEAT", 0) > 0:
+                    op = ["PICKUP", "WHEAT", 1]
+                else:
+                    op = _tile_action(hand_tile, move, crop_seeds, crop_to_plant, obs)
+        elif hand_tile == "LOCKED" or (hx, hy) not in HAND_ZONES[i % len(HAND_ZONES)]:
+            op = move
+        else:
+            if (hx, hy) == STRAWBERRY_TILE:
+                op = _tile_action(hand_tile, move, strawberry_seeds, "STRAWBERRY", obs)
+            else:
+                op = _tile_action(hand_tile, move, crop_seeds, crop_to_plant, obs)
+        hands.append(op)
+
+    if len(obs["farms"][obs["player"]]["hands"]) < 5:
+        market.append(["HIRE"])
+
+    if obs["step"] == 0 or crop_seeds <= 5:
+        market.append(["BUY_SEED", crop_to_plant, 6 - crop_seeds])
+
+    farmer_pos = obs["farms"][obs["player"]]["farmer"]
+    x, y = farmer_pos
+    target_x, target_y = LOOP_ORDER_12[(x, y)]
+    direction = DIRECTIONS[(target_x - x, target_y - y)]
+
+    tile = obs["farms"][obs["player"]]["tiles"][y][x]
+
+    wheat_in_shed = obs["private"]["shed"].get("WHEAT", 0)
+    melon_in_shed = obs["private"]["shed"].get("MELON", 0)
+    fertilizer_in_shed = obs["private"]["shed"].get("FERTILIZER", 0)
+    milk_in_shed = obs["private"]["shed"].get("MILK", 0)
+    strawberry_in_shed = obs["private"]["shed"].get("STRAWBERRY", 0)
+    if wheat_in_shed > 1:
+        market.append(["SELL", "WHEAT", wheat_in_shed - 1])
+    if melon_in_shed > 0:
+        market.append(["SELL", "MELON", melon_in_shed])
+    if fertilizer_in_shed > 0:
+        market.append(["SELL", "FERTILIZER", fertilizer_in_shed])
+    if milk_in_shed > 0:
+        market.append(["SELL", "MILK", milk_in_shed])
+    if strawberry_in_shed > 0:
+        market.append(["SELL", "STRAWBERRY", strawberry_in_shed])
+
+    farmer = _tile_action(tile, [direction], crop_seeds, crop_to_plant, obs)
 
     return {"farmer": farmer, "hands": hands, "market": market}

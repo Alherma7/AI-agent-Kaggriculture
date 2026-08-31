@@ -211,6 +211,48 @@ function's docstring.
   with a `BUY_PRODUCT` order, missed its own turn budget for reaching the
   coop at all (diagnosed by an Opus-run instrumented A/B, not guessed).
 
+- **`kaggriculture.py`'s `PRODUCTS` list, read directly** (not assumed;
+  checked this session, extends `notebooks/13_goose.ipynb`)
+  Why: confirmed `"FERTILIZER"` is a normal sellable product key, same as
+  `"WHEAT"`/`"MELON"`/`"EGG"` — `COLLECT_FERTILIZER` adds to the acting
+  unit's inventory under that exact string, which auto-drops to
+  `obs["private"]["shed"]["FERTILIZER"]` at day's end like any other
+  product. An instrumented episode showed it accumulating to 27 units by
+  turn ~710 and never selling, matching a Kaggle validation-replay
+  screenshot noted in `PROGRESS.md` (2026-08-27). Source for the
+  `SELL FERTILIZER` addition to
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_agent`
+  (validated in `notebooks/13_goose.ipynb`, tested in
+  `tests/test_baseline.py`): checked every turn next to `WHEAT`/`MELON`
+  (farmer-level, unconditional) rather than gated on hand 4 having nothing
+  else to do (the `SELL EGG` pattern) — hand 4 is busy with
+  `FEED`/`COLLECT_FERTILIZER`/`CARE`/`HARVEST` on some turns, so the
+  EGG-style gate would delay (in the worst case, indefinitely block)
+  selling. Beats the ungated version 10/10 across two independent
+  `evaluate()` calls.
+
+- **`kaggriculture.py`'s `ANIMALS` table and `_daily_refresh_animals`, read
+  directly** (not assumed; extends `notebooks/14_cow.ipynb`, this session)
+  Why: confirmed `_daily_refresh_animals` and the
+  `FEED`/`COLLECT_FERTILIZER`/`CARE`/`HARVEST` action handlers are the
+  *same* function for `COOP` and `PASTURE` -- only `interval`/
+  `first_yield_day`/`max_held` differ per animal in the `ANIMALS` table,
+  and the agent's own logic never reads those values directly (unlike crop
+  harvest thresholds, hardcoded per crop in every wheat/melon agent so
+  far). This meant a second animal (`COW`/`MILK`, structure `PASTURE`)
+  could skip the isolated mini-test stage the goose needed and go straight
+  to a hand inside `melon_then_wheat_goose_agent`. Source for
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_cow_agent`
+  (validated in `notebooks/14_cow.ipynb`, tested in
+  `tests/test_baseline.py`): hand 2 repurposed for the cow (mirrors hand 4
+  for the goose, no new hire), `HAND_ZONES[2]` sacrificed for
+  `PASTURE_TILE` since all 13 free NW tiles were already claimed. Beats
+  `melon_then_wheat_goose_agent` decisively (`win_rate=1.0` across two
+  independent `evaluate()` calls both in the notebook and after
+  graduation), confirmed via an instrumented episode (not just money): 31
+  `HARVEST` actions, 11 `SELL MILK` orders totaling 33 units, shed `MILK`
+  capping at `COW`'s `max_held=6` and never overflowing.
+
 - **`notebooks/kaggriculture-getting-started.ipynb`** (bovard, official Kaggle
   starter kernel)
   Why: confirms `obs` supports both `.get()` and dotted attribute access;
@@ -221,6 +263,59 @@ function's docstring.
   Kaggle: no hands/land expansion, single crop only, no fertilizing, dumps
   full shed in one sell order (crashes its own price). Those weaknesses map
   directly onto Level 2 of our roadmap in `PROGRESS.md`.
+
+- **Kaggriculture leaderboard replay `replays/103962387.json`** (`ringbearer`
+  105735 vs `islet` 135063, both far above our prior best ~31-32k; analyzed
+  2026-08-31, logged in `PROGRESS.md`) plus explicit chat scope decision to
+  infer generalizable rules rather than clone the opponent's replay trace
+  (see the `kaggriculture-hamburger.ipynb` entry below)
+  Why: both seats' near-identical strategy revealed the next real gaps
+  beyond `melon_then_wheat_goose_cow_agent` -- a 3rd/4th crop, land+more
+  hands on a fixed day schedule, a 2nd `PASTURE` animal, `FERTILIZE`
+  applied, and `DIG`. Source for starting the roadmap with `STRAWBERRY`
+  (an `ongoing` crop, `first_yield_day=10`, mixed sparingly into hands'
+  existing zones in the replay rather than a dedicated hand) in
+  `notebooks/15_leaderboard_agent.ipynb`. Also source for extracting
+  `_tile_action` in
+  `src/kaggriculture_bot/strategies/baseline.py` (deduplicating the
+  4x-copied per-tile `HARVEST`/`WATER`/`PLANT` block so each new roadmap
+  item -- `STRAWBERRY` here, `FERTILIZE`/`DIG`/`CARROT` later -- changes
+  in one place; re-validated as a behavior-neutral refactor, `win_rate=0.5`,
+  before any new behavior) and for `STRAWBERRY_TILE`'s single-fixed-tile
+  placement: an `ongoing` tile never clears after `HARVEST`, so once
+  `STRAWBERRY`'s `max_yield=4` lifetime units are collected the tile is
+  dead weight until `DIG` (roadmap step 5, not built yet) can reclaim it --
+  deliberately minimal for that reason.
+
+- **`kaggriculture.py`'s `CROPS` table, `_new_plant`, the `WATER`/`HARVEST`
+  action handlers, `_daily_refresh_plants`, and `_decay_plants`/
+  `max_lifespan_step`, all read directly** (not assumed; extends
+  `notebooks/15_leaderboard_agent.ipynb`) plus an Opus-run instrumented,
+  seeded A/B (10 fixed seeds, reproducible; project owner's explicit "use
+  Opus" call for this diagnosis)
+  Why: confirmed non-`ongoing` crops (`WHEAT`/`MELON`) get 1 free
+  `yield_units` at planting plus a bonus per day watered inside an
+  inclusive window `[(max_yield_day+1)//2, max_yield_day]`, capped at
+  `max_yield`; `ongoing` crops (`STRAWBERRY`) instead accumulate on a
+  fixed schedule via `_daily_refresh_plants`, and the tile never clears
+  after `HARVEST`. A first attempt at capturing `WHEAT`/`MELON`'s bonus
+  window (wait until `crop_age > max_yield_day` before harvesting)
+  regressed hard: that threshold is the exact step `_decay_plants` starts
+  converting the tile toward `WEED`
+  (`max_lifespan_step = (planted_day + max_yield_day + 1) * turns_per_day`),
+  and `_tile_action` had no `WEED` branch, so 20/25 tiles were lost
+  permanently in one 10-seed comparison; a second-order bug (the longer
+  `WHEAT` cycle delayed the first harvest past the `BUY_PRODUCT WHEAT`
+  backstop's `day < 10` cutoff, starving and losing the cow) compounded
+  it. Source for the fix in
+  `src/kaggriculture_bot/strategies/baseline.py::melon_then_wheat_goose_cow_strawberry_agent`
+  (validated in `notebooks/15_leaderboard_agent.ipynb`, tested in
+  `tests/test_baseline.py`): harvest at `crop_age >= max_yield_day` (not
+  `>`), and the `BUY_PRODUCT WHEAT` backstop extended to `day < 13`.
+  Ruled out as the mechanism: market-price crashing from bursty sells
+  (identical `WHEAT` sale prices between variants at every sell) and hand
+  2/4's opportunistic transit-tile tending (the pure `_tile_action`
+  refactor's exact bit-for-bit tie already showed that wiring unchanged).
 
 ## Papers
 

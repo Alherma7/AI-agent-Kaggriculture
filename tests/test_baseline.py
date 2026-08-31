@@ -27,6 +27,13 @@ from kaggriculture_bot.strategies.baseline import (
     GOOSE_TILE,
     GOOSE_FEEDER,
     melon_then_wheat_goose_agent,
+    PASTURE_TILE,
+    PASTURE_FEEDER,
+    melon_then_wheat_goose_cow_agent,
+    CROP_INFO,
+    STRAWBERRY_TILE,
+    _tile_action,
+    melon_then_wheat_goose_cow_strawberry_agent,
 )
 
 
@@ -957,6 +964,11 @@ def make_goose_obs(
     melon_shed=0,
     goose_shed=0,
     egg_shed=0,
+    fertilizer_shed=0,
+    cow_shed=0,
+    milk_shed=0,
+    strawberry_seeds=0,
+    strawberry_shed=0,
     farmer=(4, 4),
     hands=(),
     tiles=None,
@@ -986,8 +998,17 @@ def make_goose_obs(
             }
         ],
         "private": {
-            "seeds": {"WHEAT": seeds, "MELON": melon_seeds},
-            "shed": {"WHEAT": shed, "MELON": melon_shed, "GOOSE": goose_shed, "EGG": egg_shed},
+            "seeds": {"WHEAT": seeds, "MELON": melon_seeds, "STRAWBERRY": strawberry_seeds},
+            "shed": {
+                "WHEAT": shed,
+                "MELON": melon_shed,
+                "GOOSE": goose_shed,
+                "EGG": egg_shed,
+                "FERTILIZER": fertilizer_shed,
+                "COW": cow_shed,
+                "MILK": milk_shed,
+                "STRAWBERRY": strawberry_shed,
+            },
             "inventories": inventories,
         },
     }
@@ -1155,7 +1176,369 @@ def test_goose_hand_sells_eggs_when_nothing_left_to_do_that_day():
     assert ["SELL", "EGG", 2] in action["market"]
 
 
+def test_goose_sells_the_full_fertilizer_shed_every_turn():
+    # Checked every turn at farmer level (like WHEAT/MELON), not gated on
+    # hand 4 having nothing else to do (like EGG) -- PROGRESS.md, this
+    # session: hand 4 is busy with FEED/COLLECT_FERTILIZER/CARE/HARVEST on
+    # some turns, so an EGG-style check would delay selling on those turns.
+    obs = make_goose_obs(day=15, fertilizer_shed=3)
+    action = melon_then_wheat_goose_agent(obs)
+    assert ["SELL", "FERTILIZER", 3] in action["market"]
+
+
 def test_goose_feeder_is_a_closed_two_step_route_to_goose_tile():
     assert GOOSE_FEEDER[(4, 4)] == (4, 3)
     assert GOOSE_FEEDER[(4, 3)] == GOOSE_TILE
     assert GOOSE_FEEDER[GOOSE_TILE] == GOOSE_TILE
+
+
+def test_cow_buys_cow_on_step_zero():
+    obs = make_goose_obs(step=0, hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert ["BUY_ANIMAL", "COW", 1] in action["market"]
+
+
+def test_cow_hand_uses_direct_feeder_route_not_shared_loop():
+    # LOOP_ORDER_HANDS would send (4,4) -> (3,4) (WEST). PASTURE_FEEDER
+    # sends it -> (4,3) (NORTH) instead, mirroring GOOSE_FEEDER's
+    # pre-emptive shortcut (notebooks/14_cow.ipynb: reaches PASTURE_TILE by
+    # turn 15, no stall, unlike goose's original un-fed version).
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["NORTH"]
+
+
+def test_cow_hand_picks_up_cow_when_shed_has_one():
+    obs = make_goose_obs(cow_shed=1, hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["PICKUP", "COW", 1]
+
+
+def test_cow_hand_picks_up_wheat_once_carrying_cow_and_shed_has_wheat():
+    obs = make_goose_obs(
+        shed=1,
+        hands=[(3, 4), (3, 4), (4, 4)],
+        inventories=[{}, {}, {}, {"COW": 1}],
+    )
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["PICKUP", "WHEAT", 1]
+
+
+def test_cow_hand_does_not_stall_trying_to_pick_up_wheat_that_does_not_exist():
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": False}
+    obs = make_goose_obs(
+        shed=0,
+        tiles={(4, 4): tile},
+        hands=[(3, 4), (3, 4), (4, 4)],
+    )
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["WATER"]
+
+
+def test_cow_hand_moves_off_locked_spawn_corner():
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), (5, 4)], tiles={(5, 4): "LOCKED"})
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["WEST"]
+
+
+def test_cow_hand_tends_a_transit_tile_opportunistically():
+    obs = make_goose_obs(
+        day=0,
+        melon_seeds=1,
+        tiles={(4, 3): None},
+        hands=[(3, 4), (3, 4), (4, 3)],
+    )
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["PLANT", "MELON"]
+
+
+def test_cow_hand_builds_pasture_on_empty_pasture_tile():
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), PASTURE_TILE], tiles={PASTURE_TILE: None})
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["BUILD_PASTURE"]
+
+
+def test_cow_hand_places_cow_when_carrying_one_on_empty_pasture():
+    # Regression for the real bug found while writing this: the first draft
+    # checked hand_tile.get("kind") == "COW" instead of "PASTURE" -- a
+    # tile's kind is the structure, not the animal placed on it.
+    obs = make_goose_obs(
+        hands=[(3, 4), (3, 4), PASTURE_TILE],
+        tiles={PASTURE_TILE: {"kind": "PASTURE"}},
+        inventories=[{}, {}, {}, {"COW": 1}],
+    )
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["PLACE", "COW", 1]
+
+
+def test_cow_hand_feeds_when_carrying_wheat_and_not_fed_today():
+    tile = {
+        "kind": "PASTURE",
+        "animal": "COW",
+        "fed_today": False,
+        "cared_today": False,
+        "fertilizer_available": False,
+        "yield_units": 0,
+    }
+    obs = make_goose_obs(
+        hands=[(3, 4), (3, 4), PASTURE_TILE],
+        tiles={PASTURE_TILE: tile},
+        inventories=[{}, {}, {}, {"WHEAT": 1}],
+    )
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["FEED"]
+
+
+def test_cow_hand_still_cares_without_wheat_in_hand():
+    tile = {
+        "kind": "PASTURE",
+        "animal": "COW",
+        "fed_today": True,
+        "cared_today": False,
+        "fertilizer_available": False,
+        "yield_units": 0,
+    }
+    obs = make_goose_obs(
+        hands=[(3, 4), (3, 4), PASTURE_TILE],
+        tiles={PASTURE_TILE: tile},
+        inventories=[{}, {}, {}, {}],
+    )
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["CARE"]
+
+
+def test_cow_hand_collects_fertilizer_before_caring():
+    tile = {
+        "kind": "PASTURE",
+        "animal": "COW",
+        "fed_today": True,
+        "cared_today": False,
+        "fertilizer_available": True,
+        "yield_units": 0,
+    }
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), PASTURE_TILE], tiles={PASTURE_TILE: tile})
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["COLLECT_FERTILIZER"]
+
+
+def test_cow_hand_harvests_when_yield_ready():
+    tile = {
+        "kind": "PASTURE",
+        "animal": "COW",
+        "fed_today": True,
+        "cared_today": True,
+        "fertilizer_available": False,
+        "yield_units": 2,
+    }
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), PASTURE_TILE], tiles={PASTURE_TILE: tile})
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["HARVEST"]
+
+
+def test_cow_hand_passes_at_pasture_when_nothing_left_to_do():
+    tile = {
+        "kind": "PASTURE",
+        "animal": "COW",
+        "fed_today": True,
+        "cared_today": True,
+        "fertilizer_available": False,
+        "yield_units": 0,
+    }
+    obs = make_goose_obs(hands=[(3, 4), (3, 4), PASTURE_TILE], tiles={PASTURE_TILE: tile})
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert action["hands"][2] == ["PASS"]
+
+
+def test_cow_sells_the_full_milk_shed_every_turn():
+    # Checked every turn at farmer level, same as FERTILIZER earlier this
+    # session -- not gated on hand 2 having nothing else to do (the EGG
+    # pattern), since hand 2 is busy with FEED/COLLECT_FERTILIZER/CARE/
+    # HARVEST some turns too.
+    obs = make_goose_obs(day=15, milk_shed=4, hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_agent(obs)
+    assert ["SELL", "MILK", 4] in action["market"]
+
+
+def test_cow_feeder_is_a_direct_route_to_pasture_tile():
+    assert PASTURE_FEEDER[(4, 4)] == (4, 3)
+    assert PASTURE_FEEDER[(4, 3)] == (4, 2)
+    assert PASTURE_FEEDER[(4, 2)] == PASTURE_TILE
+    assert PASTURE_FEEDER[PASTURE_TILE] == PASTURE_TILE
+
+
+# -- _tile_action / CROP_INFO / STRAWBERRY -------------------------------
+#
+# notebooks/15_leaderboard_agent.ipynb: _tile_action extracts the
+# HARVEST/WATER/PLANT decision previously duplicated 4x inline. Tested
+# directly (it only needs obs["day"], not a full obs) rather than only
+# through the agent, since it's the actual reusable unit now.
+
+
+def test_crop_info_marks_strawberry_as_ongoing_and_wheat_melon_as_not():
+    assert CROP_INFO["STRAWBERRY"]["ongoing"] is True
+    assert CROP_INFO["WHEAT"]["ongoing"] is False
+    assert CROP_INFO["MELON"]["ongoing"] is False
+
+
+def test_tile_action_plants_the_given_crop_on_an_empty_tile_with_seed():
+    action = _tile_action(None, ["PASS"], 1, "WHEAT", {"day": 0})
+    assert action == ["PLANT", "WHEAT"]
+
+
+def test_tile_action_falls_back_on_an_empty_tile_without_seed():
+    action = _tile_action(None, ["PASS"], 0, "WHEAT", {"day": 0})
+    assert action == ["PASS"]
+
+
+def test_tile_action_non_ongoing_waters_before_the_yield_window_closes():
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": False, "yield_units": 1}
+    action = _tile_action(tile, ["PASS"], 0, "WHEAT", {"day": 2})
+    assert action == ["WATER"]
+
+
+def test_tile_action_non_ongoing_harvests_once_max_yield_day_is_reached():
+    # WHEAT's max_yield_day is 4 -- harvest must fire at crop_age == 4, not
+    # wait for crop_age > 4 (the regression the Opus-diagnosed fix
+    # addresses: waiting past max_yield_day lets the engine's own decay
+    # convert the tile to WEED before the next visit).
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": False, "yield_units": 3}
+    action = _tile_action(tile, ["PASS"], 0, "WHEAT", {"day": 4})
+    assert action == ["HARVEST"]
+
+
+def test_tile_action_non_ongoing_harvests_early_once_max_yield_is_reached():
+    # Already capped at max_yield (6) before max_yield_day -- no point
+    # waiting out the rest of the window.
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": False, "yield_units": 6}
+    action = _tile_action(tile, ["PASS"], 0, "WHEAT", {"day": 3})
+    assert action == ["HARVEST"]
+
+
+def test_tile_action_non_ongoing_falls_back_once_watered_and_not_yet_ready():
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": True, "yield_units": 1}
+    action = _tile_action(tile, ["EAST"], 0, "WHEAT", {"day": 2})
+    assert action == ["EAST"]
+
+
+def test_tile_action_ongoing_waters_even_when_yield_is_already_available():
+    # Regression for the real bug this addresses: an ongoing crop must
+    # never stop watering just because it's harvestable, or it turns to
+    # WEED after 2 consecutive unwatered days.
+    tile = {"kind": "PLANT", "crop": "STRAWBERRY", "planted_day": 0, "watered_today": False, "yield_units": 1}
+    action = _tile_action(tile, ["PASS"], 0, "STRAWBERRY", {"day": 12})
+    assert action == ["WATER"]
+
+
+def test_tile_action_ongoing_harvests_once_watered_and_yield_is_available():
+    tile = {"kind": "PLANT", "crop": "STRAWBERRY", "planted_day": 0, "watered_today": True, "yield_units": 1}
+    action = _tile_action(tile, ["PASS"], 0, "STRAWBERRY", {"day": 12})
+    assert action == ["HARVEST"]
+
+
+def test_tile_action_ongoing_falls_back_once_watered_with_nothing_to_harvest():
+    tile = {"kind": "PLANT", "crop": "STRAWBERRY", "planted_day": 0, "watered_today": True, "yield_units": 0}
+    action = _tile_action(tile, ["SOUTH"], 0, "STRAWBERRY", {"day": 5})
+    assert action == ["SOUTH"]
+
+
+# -- melon_then_wheat_goose_cow_strawberry_agent -------------------------
+
+
+def test_strawberry_buys_one_strawberry_seed_on_step_zero():
+    obs = make_goose_obs(step=0, hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert ["BUY_SEED", "STRAWBERRY", 1] in action["market"]
+
+
+def test_strawberry_does_not_rebuy_seed_past_step_zero():
+    obs = make_goose_obs(step=100, hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert not any(order[:2] == ["BUY_SEED", "STRAWBERRY"] for order in action["market"])
+
+
+def test_strawberry_backstop_still_buys_wheat_through_day_twelve():
+    # Extended from day < 10 to day < 13 -- covers the longer WHEAT cycle
+    # the max_yield_day harvest timing now takes.
+    obs = make_goose_obs(day=12, shed=0, hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert ["BUY_PRODUCT", "WHEAT", 1] in action["market"]
+
+
+def test_strawberry_backstop_stops_at_day_thirteen():
+    obs = make_goose_obs(day=13, shed=0, hands=[(3, 4), (3, 4), (3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert ["BUY_PRODUCT", "WHEAT", 1] not in action["market"]
+
+
+def test_hand_at_strawberry_tile_plants_strawberry_not_the_rotating_crop():
+    obs = make_goose_obs(
+        strawberry_seeds=1,
+        melon_seeds=1,
+        hands=[STRAWBERRY_TILE, (3, 4), (4, 4)],
+        tiles={STRAWBERRY_TILE: None},
+    )
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert action["hands"][0] == ["PLANT", "STRAWBERRY"]
+
+
+def test_hand_at_strawberry_tile_does_not_use_the_rotating_crops_seed_count():
+    # Regression: the STRAWBERRY_TILE branch must gate on strawberry_seeds,
+    # not the general crop_seeds -- caught live while writing this agent
+    # (an earlier draft passed crop_to_plant's own seed count by mistake).
+    obs = make_goose_obs(
+        strawberry_seeds=0,
+        melon_seeds=5,
+        hands=[STRAWBERRY_TILE, (3, 4), (4, 4)],
+        tiles={STRAWBERRY_TILE: None},
+    )
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert action["hands"][0] != ["PLANT", "STRAWBERRY"]
+    assert action["hands"][0] != ["PLANT", "MELON"]
+
+
+def test_hand_off_strawberry_tile_still_plants_the_rotating_crop():
+    obs = make_goose_obs(
+        melon_seeds=1,
+        hands=[(0, 0), (3, 4), (4, 4)],
+        tiles={(0, 0): None},
+    )
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert action["hands"][0] == ["PLANT", "MELON"]
+
+
+def test_strawberry_tile_ongoing_crop_waters_instead_of_stalling_once_harvestable():
+    tile = {
+        "kind": "PLANT",
+        "crop": "STRAWBERRY",
+        "planted_day": 0,
+        "watered_today": False,
+        "yield_units": 1,
+    }
+    obs = make_goose_obs(
+        day=12,
+        hands=[STRAWBERRY_TILE, (3, 4), (4, 4)],
+        tiles={STRAWBERRY_TILE: tile},
+    )
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert action["hands"][0] == ["WATER"]
+
+
+def test_strawberry_sells_the_full_shed_when_present():
+    obs = make_goose_obs(day=16, strawberry_shed=3, hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert ["SELL", "STRAWBERRY", 3] in action["market"]
+
+
+def test_strawberry_does_not_sell_when_shed_is_empty():
+    obs = make_goose_obs(day=16, strawberry_shed=0, hands=[(3, 4), (3, 4), (4, 4)])
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert not any(order[:2] == ["SELL", "STRAWBERRY"] for order in action["market"])
+
+
+def test_strawberry_farmer_harvests_at_max_yield_day_not_after():
+    # Same regression as the _tile_action unit test above, exercised through
+    # the full agent's farmer branch.
+    tile = {"kind": "PLANT", "crop": "WHEAT", "planted_day": 0, "watered_today": False, "yield_units": 1}
+    obs = make_goose_obs(day=4, farmer=(4, 4), tiles={(4, 4): tile}, hands=[(3, 4), (3, 4), (3, 4)])
+    action = melon_then_wheat_goose_cow_strawberry_agent(obs)
+    assert action["farmer"] == ["HARVEST"]

@@ -55,85 +55,70 @@ HAND_ZONES = [
 GOOSE_TILE = (4, 2)
 SHED_ADJACENT = {(4, 4), (5, 4), (4, 5), (5, 5)}
 GOOSE_FEEDER = {(4, 4): (4, 3), (4, 3): (4, 2), (4, 2): (4, 2)}
+PASTURE_TILE = (4, 1)
+PASTURE_FEEDER = {(4, 4): (4, 3), (4, 3): (4, 2), (4, 2): (4, 1), (4, 1): (4, 1)}
+CROP_INFO = {
+    "WHEAT": {"ongoing": False, "max_yield_day": 4, "max_yield": 6},
+    "MELON": {"ongoing": False, "max_yield_day": 12, "max_yield": 6},
+    "STRAWBERRY": {"ongoing": True},
+}
+STRAWBERRY_TILE = (0, 1)
+
+
+def _tile_action(tile, fallback, crop_seeds, crop_to_plant, obs):
+    if tile is None and crop_seeds > 0:
+        action = ["PLANT", crop_to_plant]
+    elif tile is not None and tile.get("kind") == "PLANT":
+        crop_age = obs["day"] - tile["planted_day"]
+        ongoing_crop = CROP_INFO[tile["crop"]]["ongoing"]
+        if ongoing_crop:
+            if not tile.get("watered_today"):
+                action = ["WATER"]
+            elif tile.get("yield_units", 0) > 0:
+                action = ["HARVEST"]
+            else:
+                action = fallback
+        else:
+            max_yield_day = CROP_INFO[tile["crop"]]["max_yield_day"]
+            max_yield = CROP_INFO[tile["crop"]]["max_yield"]
+            if crop_age >= max_yield_day or tile.get("yield_units", 0) >= max_yield:
+                action = ["HARVEST"]
+            elif not tile.get("watered_today"):
+                action = ["WATER"]
+            else:
+                action = fallback
+    else:
+        action = fallback
+    return action
 
 
 def agent(obs):
-    """melon_then_wheat_agent extended with a goose/egg income stream on
-    hand 4, instead of that hand's own single-tile crop zone. Motivated by
-    the v5 replay (PROGRESS.md, 2026-08-23): the opponent ran COW/SHEEP
-    and direct FERTILIZER sales, income streams we had none of. Goose
-    chosen over cow/sheep as the first animal: cheapest to buy ($300 vs
-    $400/$500), fastest first yield (day 4 vs day 8/6), and no
-    every-N-days interval bookkeeping (eggs produce daily once fed).
-
-    Built in notebooks/13_goose.ipynb, in three stages, two of them
-    negative results kept for the record rather than silently discarded:
-
-    1. **Isolated mini-test** (`_test_goose_agent`, farmer-only, a
-       BUY_PRODUCT WHEAT shortcut standing in for real income): validated
-       the full BUILD_COOP -> PICKUP -> PLACE -> FEED/COLLECT_FERTILIZER/
-       CARE/HARVEST cycle against a real `obs`, finding and fixing several
-       bugs a docs-only read would have missed -- a `tile` that's `None`
-       before BUILD_COOP, `fed_today` vs. `coop_age` for the daily-care
-       gate, `PICKUP` requiring shed-adjacency, and hands/inventories
-       resetting to the shed every day.
-    2. **First integration attempt**: a dedicated 9th hand, hired only
-       after buying NE land, coop on NE's one unclaimed tile. Lost 0/10 to
-       `melon_then_wheat_extra_hands_agent` -- a real negative result, not
-       a bug (the mechanism itself worked). Root cause (found via replay
-       trace): the goose wasn't placed until day 14 (land + hire + a
-       couple of shed round-trips first), leaving too little season left,
-       on top of a daily NE-border walk that produced nothing.
-    3. **This version**: folds the goose into hand 4 of
-       `melon_then_wheat_agent` directly -- no land purchase or dedicated
-       hire needed, isolating the placement-delay problem from the NE-walk
-       one. Three more real bugs found and fixed along the way, each
-       confirmed by tracing hand 4's own position/tile/inventory turn by
-       turn (not guessed):
-       - Standing on a `"LOCKED"` tile silently no-ops *any* non-move
-         action (confirmed reading `kaggriculture.py::_apply_unit_action`)
-         -- without an explicit check, hand 4 got stuck forever retrying
-         `PICKUP` from a locked spawn corner.
-       - The `PICKUP WHEAT` condition needs the same
-         `shed.get("WHEAT", 0) > 0` guard the `PICKUP GOOSE` one already
-         had -- without it, hand 4 kept "trying" (and silently failing) to
-         pick up wheat that didn't exist yet, permanently blocking the
-         walk instead of falling through to tend/move.
-       - The goose starves and escapes (`consecutive_unfed >= 2`, per
-         `_daily_refresh_animals`) before day 10, since nobody -- including
-         hand 4's own opportunistic tending -- grows WHEAT during the
-         melon phase. Fixed with a `BUY_PRODUCT WHEAT` order whenever the
-         shed is empty pre-day-10. That fix then caused a *second*
-         regression -- hand 4 stopped reaching the coop at all, for the
-         entire game -- diagnosed by comparing turns-per-node with and
-         without the change: hand 4 only ever completes the 15-move
-         `LOOP_ORDER_HANDS` walk with zero turns to spare (19 turns
-         available, hired at hour 5), so the one extra `PICKUP WHEAT` this
-         fix adds at `(4,4)` was exactly the turn that used to close the
-         gap. Fixed with `GOOSE_FEEDER`, a direct 2-step route bypassing
-         the shared loop entirely, plus ungating the whole coop cycle from
-         holding WHEAT (only `FEED` needs it -- `COLLECT_FERTILIZER`/
-         `CARE`/`HARVEST` don't, and were being skipped for nothing).
-
-    Validated via `evaluate(melon_then_wheat_goose_agent,
-    melon_then_wheat_agent, n=10)` across two independent calls:
-    `win_rate=1.0` both times (`avg_money` 28871.0 and 29748.0), coop and
-    goose placed on day 0 in the traced episode, all 30 days reached.
+    """melon_then_wheat_goose_cow_agent extended with STRAWBERRY, an
+    ongoing crop, on a single fixed tile -- notebooks/15_leaderboard_agent.ipynb.
+    See the module-level comment block just above CROP_INFO for the full
+    account (the _tile_action refactor, the ongoing-crop mechanics, the
+    watering-window regression and its Opus-diagnosed fix, and the
+    STRAWBERRY_TILE placement rationale).
     """
     crop_to_plant = "MELON" if obs["day"] < 10 else "WHEAT"
     crop_seeds = obs["private"]["seeds"].get(crop_to_plant, 0)
+    strawberry_seeds = obs["private"]["seeds"].get("STRAWBERRY", 0)
 
     market = []
     hands = []
 
     if obs["step"] == 0:
         market.append(["BUY_ANIMAL", "GOOSE", 1])
-    if obs["day"] < 10 and obs["private"]["shed"].get("WHEAT", 0) == 0:
+        market.append(["BUY_ANIMAL", "COW", 1])
+        market.append(["BUY_SEED", "STRAWBERRY", 1])
+    if obs["day"] < 13 and obs["private"]["shed"].get("WHEAT", 0) == 0:
         market.append(["BUY_PRODUCT", "WHEAT", 1])
 
     for i, (hx, hy) in enumerate(obs["farms"][obs["player"]]["hands"]):
         if i == 4:
             hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **GOOSE_FEEDER}
+        elif i == 2:
+            hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **PASTURE_FEEDER}
         else:
             hand_loop = {**LOOP_ORDER_HANDS, **SPAWN_FEEDER, **HAND_ZONES[i % len(HAND_ZONES)]}
         target_x, target_y = hand_loop[(hx, hy)]
@@ -148,7 +133,6 @@ def agent(obs):
             hand_inventory = obs["private"]["inventories"][i + 1]
 
             if (hx, hy) == GOOSE_TILE:
-                # At the coop.
                 if hand_tile is None:
                     op = ["BUILD_COOP"]
                 elif hand_tile.get("kind") == "COOP" and hand_tile.get("animal") != "GOOSE":
@@ -170,43 +154,51 @@ def agent(obs):
                     if egg_in_shed > 0:
                         market.append(["SELL", "EGG", egg_in_shed])
             else:
-                # Not at the coop yet: pickup priority (GOOSE, then
-                # WHEAT), only possible while shed-adjacent; otherwise
-                # tend whatever tile it's standing on, same as hands 0-3.
                 if hand_tile == "LOCKED":
                     op = move
                 elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("GOOSE", 0) == 0 and obs["private"]["shed"].get("GOOSE", 0) > 0:
                     op = ["PICKUP", "GOOSE", 1]
                 elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("WHEAT", 0) == 0 and obs["private"]["shed"].get("WHEAT", 0) > 0:
                     op = ["PICKUP", "WHEAT", 1]
-                elif hand_tile is None and crop_seeds > 0:
-                    op = ["PLANT", crop_to_plant]
-                elif hand_tile is not None and hand_tile.get("kind") == "PLANT":
-                    crop_age = obs["day"] - hand_tile["planted_day"]
-                    threshold = 10 if hand_tile["crop"] == "MELON" else 2
-                    if crop_age >= threshold:
-                        op = ["HARVEST"]
-                    elif not hand_tile.get("watered_today"):
-                        op = ["WATER"]
-                    else:
-                        op = move
                 else:
+                    op = _tile_action(hand_tile, move, crop_seeds, crop_to_plant, obs)
+        elif i == 2:
+            hand_inventory = obs["private"]["inventories"][i + 1]
+
+            if (hx, hy) == PASTURE_TILE:
+                if hand_tile is None:
+                    op = ["BUILD_PASTURE"]
+                elif hand_tile.get("kind") == "PASTURE" and hand_tile.get("animal") != "COW":
+                    if hand_inventory.get("COW", 0) > 0:
+                        op = ["PLACE", "COW", 1]
+                    else:
+                        op = ["PASS"]
+                elif hand_inventory.get("WHEAT", 0) > 0 and not hand_tile.get("fed_today"):
+                    op = ["FEED"]
+                elif hand_tile.get("fertilizer_available"):
+                    op = ["COLLECT_FERTILIZER"]
+                elif not hand_tile.get("cared_today"):
+                    op = ["CARE"]
+                elif hand_tile.get("yield_units", 0) > 0:
+                    op = ["HARVEST"]
+                else:
+                    op = ["PASS"]
+            else:
+                if hand_tile == "LOCKED":
                     op = move
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("COW", 0) == 0 and obs["private"]["shed"].get("COW", 0) > 0:
+                    op = ["PICKUP", "COW", 1]
+                elif (hx, hy) in SHED_ADJACENT and hand_inventory.get("WHEAT", 0) == 0 and obs["private"]["shed"].get("WHEAT", 0) > 0:
+                    op = ["PICKUP", "WHEAT", 1]
+                else:
+                    op = _tile_action(hand_tile, move, crop_seeds, crop_to_plant, obs)
         elif hand_tile == "LOCKED" or (hx, hy) not in HAND_ZONES[i % len(HAND_ZONES)]:
             op = move
-        elif hand_tile is None and crop_seeds > 0:
-            op = ["PLANT", crop_to_plant]
-        elif hand_tile is not None and hand_tile.get("kind") == "PLANT":
-            crop_age = obs["day"] - hand_tile["planted_day"]
-            threshold = 10 if hand_tile["crop"] == "MELON" else 2
-            if crop_age >= threshold:
-                op = ["HARVEST"]
-            elif not hand_tile.get("watered_today"):
-                op = ["WATER"]
-            else:
-                op = move
         else:
-            op = move
+            if (hx, hy) == STRAWBERRY_TILE:
+                op = _tile_action(hand_tile, move, strawberry_seeds, "STRAWBERRY", obs)
+            else:
+                op = _tile_action(hand_tile, move, crop_seeds, crop_to_plant, obs)
         hands.append(op)
 
     if len(obs["farms"][obs["player"]]["hands"]) < 5:
@@ -224,23 +216,20 @@ def agent(obs):
 
     wheat_in_shed = obs["private"]["shed"].get("WHEAT", 0)
     melon_in_shed = obs["private"]["shed"].get("MELON", 0)
+    fertilizer_in_shed = obs["private"]["shed"].get("FERTILIZER", 0)
+    milk_in_shed = obs["private"]["shed"].get("MILK", 0)
+    strawberry_in_shed = obs["private"]["shed"].get("STRAWBERRY", 0)
     if wheat_in_shed > 1:
         market.append(["SELL", "WHEAT", wheat_in_shed - 1])
     if melon_in_shed > 0:
         market.append(["SELL", "MELON", melon_in_shed])
+    if fertilizer_in_shed > 0:
+        market.append(["SELL", "FERTILIZER", fertilizer_in_shed])
+    if milk_in_shed > 0:
+        market.append(["SELL", "MILK", milk_in_shed])
+    if strawberry_in_shed > 0:
+        market.append(["SELL", "STRAWBERRY", strawberry_in_shed])
 
-    if tile is None and crop_seeds > 0:
-        farmer = ["PLANT", crop_to_plant]
-    elif tile is not None and tile.get("kind") == "PLANT":
-        crop_age = obs["day"] - tile["planted_day"]
-        threshold = 10 if tile["crop"] == "MELON" else 2
-        if crop_age >= threshold:
-            farmer = ["HARVEST"]
-        elif not tile.get("watered_today"):
-            farmer = ["WATER"]
-        else:
-            farmer = [direction]
-    else:
-        farmer = [direction]
+    farmer = _tile_action(tile, [direction], crop_seeds, crop_to_plant, obs)
 
     return {"farmer": farmer, "hands": hands, "market": market}

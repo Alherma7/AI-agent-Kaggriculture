@@ -14,8 +14,10 @@ from build_agent import (
     _function_source,
     _module_to_path,
     _referenced_constant_block,
+    _referenced_function_block,
     _rewrite_internal_imports,
     _top_level_constants,
+    _top_level_functions,
     _top_level_import_block,
     generate_files,
 )
@@ -117,6 +119,93 @@ def test_referenced_constant_block_follows_transitive_references_in_declaration_
     module_source = "A = {1: 2}\nB = A\nC = {5: 6}\n"
     func_source = "def agent(obs):\n    return B\n"
     assert _referenced_constant_block(module_source, func_source) == "A = {1: 2}\nB = A\n"
+
+
+def test_top_level_functions_collects_module_level_defs_excluding_given_names():
+    source = (
+        "def helper(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "def agent(obs):\n"
+        "    return helper(obs)\n"
+    )
+    functions = _top_level_functions(source, exclude={"agent"})
+    assert functions == {"helper": "def helper(x):\n    return x\n"}
+
+
+def test_referenced_function_block_includes_only_functions_the_agent_calls():
+    module_source = (
+        "def used(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "def unused(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "def agent(obs):\n"
+        "    return used(obs)\n"
+    )
+    func_source = "def agent(obs):\n    return used(obs)\n"
+    result = _referenced_function_block(module_source, func_source, exclude={"agent"})
+    assert result == "def used(x):\n    return x\n"
+
+
+def test_referenced_function_block_follows_transitive_calls_in_declaration_order():
+    # helper_b calls helper_a; an agent that only names helper_b must still
+    # pull in helper_a.
+    module_source = (
+        "def helper_a(x):\n"
+        "    return x\n"
+        "\n"
+        "\n"
+        "def helper_b(x):\n"
+        "    return helper_a(x)\n"
+        "\n"
+        "\n"
+        "def agent(obs):\n"
+        "    return helper_b(obs)\n"
+    )
+    func_source = "def agent(obs):\n    return helper_b(obs)\n"
+    result = _referenced_function_block(module_source, func_source, exclude={"agent"})
+    assert result == (
+        "def helper_a(x):\n    return x\ndef helper_b(x):\n    return helper_a(x)\n"
+    )
+
+
+def test_referenced_function_block_empty_when_agent_calls_no_helper():
+    module_source = "def helper(x):\n    return x\n\n\ndef agent(obs):\n    return obs\n"
+    func_source = "def agent(obs):\n    return obs\n"
+    result = _referenced_function_block(module_source, func_source, exclude={"agent"})
+    assert result == ""
+
+
+def test_generate_files_includes_a_helper_function_the_agent_calls(tmp_path):
+    pkg = tmp_path / "kaggriculture_bot" / "strategies"
+    _write(
+        pkg / "foo.py",
+        "TABLE = {1: 2}\n"
+        "\n"
+        "\n"
+        "def _helper(tile):\n"
+        "    return TABLE[tile]\n"
+        "\n"
+        "\n"
+        "def foo_agent(obs):\n"
+        "    return _helper(obs)\n",
+    )
+
+    files = generate_files("kaggriculture_bot.strategies.foo:foo_agent", src_root=tmp_path)
+
+    assert set(files) == {"main.py"}
+    # The helper function itself must be present...
+    assert "def _helper(tile):" in files["main.py"]
+    # ...and so must a constant the *helper* references, even though
+    # foo_agent's own body never names TABLE directly (regression for the
+    # gap this generalizes _referenced_constant_block to close).
+    assert "TABLE = {1: 2}" in files["main.py"]
+    assert "def agent(obs):\n    return _helper(obs)\n" in files["main.py"]
 
 
 def test_top_level_import_block_collects_only_top_level_imports_in_order():

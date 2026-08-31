@@ -5,7 +5,7 @@ from pathlib import Path
 PACKAGE = "kaggriculture_bot"
 SRC_ROOT = Path(__file__).resolve().parent.parent / "src"
 AGENT_DIR = Path(__file__).resolve().parent.parent / "agent" 
-STRATEGY = "kaggriculture_bot.strategies.baseline:melon_then_wheat_goose_agent"
+STRATEGY = "kaggriculture_bot.strategies.baseline:melon_then_wheat_goose_cow_strawberry_agent"
 MAIN_HEADER = '''"""Submission entrypoint. Must define `agent(obs)` -> action dict.
 
 GENERATED FILE -- do not edit by hand. Edit the strategy in
@@ -104,6 +104,39 @@ def _referenced_constant_block(module_source, func_source):
     return "".join(constants[name] for name in ordered_names)
 
 
+def _top_level_functions(source, exclude=()):
+    """Map top-level function NAME -> its exact source text, for simple
+    module-level `def NAME(...):` definitions (e.g. _tile_action in
+    strategies/baseline.py). `exclude` skips names extracted separately
+    (the strategy function itself, already pulled via _function_source)."""
+    tree = ast.parse(source)
+    lines = source.splitlines(keepends=True)
+    functions = {}
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, ast.FunctionDef) and node.name not in exclude:
+            functions[node.name] = "".join(lines[node.lineno - 1 : node.end_lineno])
+    return functions
+
+
+def _referenced_function_block(module_source, func_source, exclude=()):
+    """Source for every top-level helper function (transitively) referenced
+    by func_source, in the order they're declared in the module -- so a
+    strategy function that calls a same-module helper (e.g. _tile_action)
+    still works standalone in agent/main.py, mirroring
+    _referenced_constant_block's approach for constants."""
+    functions = _top_level_functions(module_source, exclude=exclude)
+    referenced = set()
+    worklist = _names_referenced(func_source) & set(functions)
+    while worklist:
+        name = worklist.pop()
+        if name in referenced:
+            continue
+        referenced.add(name)
+        worklist |= _names_referenced(functions[name]) & set(functions)
+    ordered_names = [name for name in functions if name in referenced]
+    return "".join(functions[name] for name in ordered_names)
+
+
 def _top_level_import_block(source):
     rewritten = _rewrite_internal_imports(source)
     tree = ast.parse(source)
@@ -133,7 +166,15 @@ def generate_files(strategy_path, src_root=SRC_ROOT):
     module_name, func_name = strategy_path.split(":")
     module_source = _module_to_path(module_name, src_root).read_text(encoding="utf-8")
     func_source = _function_source(module_source, func_name)
-    constants_block = _referenced_constant_block(module_source, func_source)
+    functions_block = _referenced_function_block(
+        module_source, func_source, exclude={func_name}
+    )
+    # Constants referenced by a helper function (e.g. _tile_action reading
+    # CROP_INFO) matter too, not just ones func_source names directly --
+    # scan the combined source so those aren't silently dropped.
+    constants_block = _referenced_constant_block(
+        module_source, func_source + functions_block
+    )
     func_source = func_source.replace(f"def {func_name}(", "def agent(", 1)
 
     deps = {}
@@ -151,6 +192,8 @@ def generate_files(strategy_path, src_root=SRC_ROOT):
         main_body += import_block + "\n\n"
     if constants_block:
         main_body += constants_block + "\n\n"
+    if functions_block:
+        main_body += functions_block + "\n\n"
     main_body += func_source
 
     files = {"main.py": main_body}
