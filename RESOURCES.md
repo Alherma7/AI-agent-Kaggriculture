@@ -8,7 +8,7 @@ function's docstring.
 
 ## Official competition sources
 
-- **Kaggriculture README.md** (competition kit, root of this repo)
+- **Kaggriculture README.md** (competition kit; moved to `docs/GAME_RULES.md` on 2026-10-24)
   Why: authoritative game rules — object types, market price function,
   turn processing order, win condition. Ground truth for `config.py`.
 - **Kaggriculture AGENTS.md** (competition kit, root of this repo)

@@ -2,7 +2,7 @@
 
 This guide walks you through building an agent, testing it locally, and submitting it to the Kaggriculture competition on Kaggle.
 
-For full game rules, the crop / animal / shop tables, the price function, and turn-processing order, see [README.md](README.md).
+For full game rules, the crop / animal / shop tables, the price function, and turn-processing order, see [docs/GAME_RULES.md](docs/GAME_RULES.md).
 
 ## Game Overview
 
@@ -11,15 +11,15 @@ Kaggriculture is a two-player farming sim. Each player manages a farm and compet
 - **Farm** — each player has a `boardSize` × `boardSize` grid (default 10 × 10) divided into four 5 × 5 quadrants. Only the NW quadrant is unlocked at the start; the other three (`NE`, `SW`, `SE`) can be bought via `BUY_LAND` for $1k / $2k / $4k respectively
 - **Starting bank** — `startingMoney` defaults to $3000
 - **Farmer & farm hands** — one main farmer per player, plus up to N hired hands per day. Hire cost is `farmHandCostMult * fib(n)` where `n` is the number of hires already made today; with the default `farmHandCostMult = 1` that's `1, 1, 2, 3, 5, 8, 13, 21, ...` and resets at the start of each day. Each unit independently acts every turn
-- **Crops** — Wheat, Carrot, Tomato (ongoing), Strawberry (ongoing), Melon. Each has its own seed cost, growth time, yield curve, and base sale price (see the Object Types table in [README.md](README.md))
+- **Crops** — Wheat, Carrot, Tomato (ongoing), Strawberry (ongoing), Melon. Each has its own seed cost, growth time, yield curve, and base sale price (see the Object Types table in [docs/GAME_RULES.md](docs/GAME_RULES.md))
 - **Watering bonus** — for one-time crops, watering during the bonus window (starting at `ceil(max_yield_day / 2)`) adds 1 unit per day to harvestable yield. `FERTILIZE` doubles that bonus for 3 days. For ongoing crops, scheduled production yields 1 by default, doubled to 2 if both fertilized and watered that day
 - **Animals** — Goose (eggs, requires coop), Cow (milk, requires pasture), Sheep (wool, requires pasture). Must be fed wheat daily; `CARE` banks +1 per fed-and-cared day, paid out in full on the next scheduled production; `COLLECT_FERTILIZER` gathers 1 fertilizer/animal/day. Unlike crops, animals produce indefinitely as long as they are fed — `max_held` caps unharvested product on the tile, not lifetime output
 - **Watering / feeding** — plants must be watered and animals fed daily. Two consecutive missed end-of-day refreshes turn plants into weeds and cause animals to escape (unrecoverable). The planting day counts as the first unwatered day
 - **Decay** — once a plant passes its max lifespan (one day after `max_yield_day` for one-time crops, one day after the cumulative production cap for ongoing crops), `yield_units` drops by 1 every other turn until 0, at which point the tile becomes a weed
 - **Weeds** — every empty unlocked tile has a `weedSpawnChance` (default 0.005) of spawning a weed at end-of-day; clear with `DIG`
 - **Shed** — non-seed inventory cap of 100 items. Items beyond the cap at end-of-day drop are discarded. Seeds live in their own slot (no cap, never picked up by `PICKUP` — `PLANT` consumes them directly)
-- **Market** — fixed prices for seeds, animals, and `BUY_PRODUCT` orders; sale prices for harvested produce vary dynamically with market inventory. Price is `base` at the shared starting inventory `I0`, rises as inventory falls, and falls as inventory grows, using a per-resource shape function (`linear`, `sq`, `sqrt`, or `log`) that can differ on each side of `I0` — so gluts hit premium goods (strawberry, melon, milk, wool) hard, driving them to the $1 floor, while staples absorb oversupply more gently (see the Price Function table in [README.md](README.md)). Only wheat and fertilizer can be bought back via `BUY_PRODUCT`; every product can be sold via `SELL`. Each turn, at most `maxMarketOrdersPerTurn` (default 10) orders are processed per player; extras are silently dropped
-- **Town** — town center always demands product (1 of each non-fertilizer product every `townCenterSellInterval` turns, default 12, scaling to 2× after day 10 and 4× after day 20). Additional shops unlock every `townShopUnlockInterval` days (default 3, random selection from the remaining pool); each unlocked shop consumes one of every product it demands every `townShopSellInterval` turns (default 4, single-product shops consume 2×) — see the Town Buildings table in [README.md](README.md)
+- **Market** — fixed prices for seeds, animals, and `BUY_PRODUCT` orders; sale prices for harvested produce vary dynamically with market inventory. Price is `base` at the shared starting inventory `I0`, rises as inventory falls, and falls as inventory grows, using a per-resource shape function (`linear`, `sq`, `sqrt`, or `log`) that can differ on each side of `I0` — so gluts hit premium goods (strawberry, melon, milk, wool) hard, driving them to the $1 floor, while staples absorb oversupply more gently (see the Price Function table in [docs/GAME_RULES.md](docs/GAME_RULES.md)). Only wheat and fertilizer can be bought back via `BUY_PRODUCT`; every product can be sold via `SELL`. Each turn, at most `maxMarketOrdersPerTurn` (default 10) orders are processed per player; extras are silently dropped
+- **Town** — town center always demands product (1 of each non-fertilizer product every `townCenterSellInterval` turns, default 12, scaling to 2× after day 10 and 4× after day 20). Additional shops unlock every `townShopUnlockInterval` days (default 3, random selection from the remaining pool); each unlocked shop consumes one of every product it demands every `townShopSellInterval` turns (default 4, single-product shops consume 2×) — see the Town Buildings table in [docs/GAME_RULES.md](docs/GAME_RULES.md)
 - **Season length** — 24 turns per day × 30 days = 720 turns by default
 - **Win condition** — most coins in the bank at the end of the season; ties are possible
 
@@ -99,7 +99,7 @@ def agent(obs):
     return {"farmer": ["PASS"], "hands": [], "market": market}
 ```
 
-For a fuller example (and per-crop yield/cost details for Carrot, Tomato, Strawberry, and Melon), see the Object Types and Quick Start sections in [README.md](README.md).
+For a fuller example (and per-crop yield/cost details for Carrot, Tomato, Strawberry, and Melon), see the Object Types and Quick Start sections in [docs/GAME_RULES.md](docs/GAME_RULES.md).
 
 ## Test Locally
 
