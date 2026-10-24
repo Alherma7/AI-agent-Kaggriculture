@@ -172,6 +172,7 @@ Source: <a href="https://github.com/Alherma7/AI-agent-Kaggriculture">github.com/
   <a href="#untried">What we never tried</a>
   <a href="#lessons">Lessons</a>
   <a href="#top">Vs. the top finishers</a>
+  <a href="#future">Future: an RL version</a>
 </nav>
 
 <h2 id="problem">The problem</h2>
@@ -481,6 +482,81 @@ and the 2nd-place team had not published full write-ups at the time of writing.<
 <a href="https://github.com/B3tMy3x/farmcore-kaggriculture">4th</a> ·
 <a href="https://github.com/definitelynotrussellkirk-bit/kaggriculture-sft">5th</a> ·
 <a href="https://github.com/Decem-Y/kaggriculture-bc">7th</a>.</p>
+
+<h2 id="future">Future: an RL version</h2>
+<p>Reinforcement learning sat on this project's roadmap as Level 4, "only if heuristics
+plateau", and was never reached. The heuristics did plateau, and RL fundamentals are the
+skill I want to build next. Kaggriculture is a good testbed for that: a deterministic
+engine, public replays of strong players, a fast community simulator, and detailed
+write-ups of what failed.</p>
+
+<h3>How the top teams used RL</h3>
+<p>Nobody won with pure RL. Everyone who tried PPO from scratch reported that it collapsed:
+720 turns with a reward only at the end is too long a path for the signal to reach the
+early decisions. What worked was RL as a <b>second stage on top of imitation</b>:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Place</th><th>How RL was used</th><th>Outcome</th></tr></thead>
+  <tbody>
+    <tr><td>1st</td><td>BC → self-play PPO, alternated several times; a heuristic planner generated extra demonstrations</td><td>~8.3M self-play games in the final model's lineage</td></tr>
+    <tr><td>3rd</td><td>BC → PPO against itself and a league of past versions and rival clones</td><td>"Most of the strength came from PPO"; up to 23 A100s</td></tr>
+    <tr><td>6th</td><td>Frozen BC policy plays days 1–11; a PPO-trained policy takes over from day 12</td><td>A shorter horizon made PPO tractable</td></tr>
+    <tr><td>7th</td><td>Evolution strategies and PPO on the BC policy's conditioning embedding</td><td>+$1k/game, submitted, but flipped too few games; final was pure BC</td></tr>
+    <tr><td>4th</td><td>PPO with change in net worth as the reward</td><td>+$1.3k/game, but ~10× less gain per GPU-hour than better data; dropped</td></tr>
+  </tbody>
+</table>
+</div>
+<p>The details that made RL work, repeated across write-ups:</p>
+<ul>
+  <li><b>Reward = final win/loss only.</b> Shaped rewards (e.g. for buying land) broke the critic.</li>
+  <li><b>Clip the PPO ratio per decision, not per turn.</b> A turn holds ~31 decisions
+    (units + market slots); their joint probability ratio leaves the clip range at once and
+    learning stalls.</li>
+  <li><b>A critic separate from the policy</b>, antisymmetric between the two players
+    (3rd place). Sharing the trunk let the value loss damage the policy.</li>
+  <li><b>A league and a promotion gate</b>: train against past generations and rival clones,
+    promote a new generation only if it beats the champion over many paired games.</li>
+  <li><b>Throughput first</b>: transition-exact C++/Rust engines, batched games, and large
+    rollouts, because one action's true effect ($30–400) is buried under ±$1–2k of noise.</li>
+</ul>
+
+<h3>Plan</h3>
+<p>Each stage ends with a measurable gate, the same discipline used throughout this
+project.</p>
+<div class="pipeline">
+  <div class="pstep"><b>1. Fundamentals.</b> MDPs, value iteration, tabular Q-learning
+    (Taxi, FrozenLake); then REINFORCE and PPO on CartPole and LunarLander, first with
+    Stable-Baselines3, then a single-file PPO written from scratch (CleanRL as reference).
+    <br><i>Gate:</i> my own PPO matches the library's learning curve on LunarLander.</div>
+  <div class="parrow">↓</div>
+  <div class="pstep"><b>2. A reduced Kaggriculture.</b> A Gym wrapper over a cut-down game:
+    one player, no opponent, 1–3 days, farmer only, wheat only, a small discrete action
+    space. Learn the delayed-reward problem at a horizon where it is still solvable.
+    <br><i>Gate:</i> PPO beats the hand-written wheat loop from notebook 03.</div>
+  <div class="parrow">↓</div>
+  <div class="pstep"><b>3. Fast engine and evaluation.</b> Adopt the community C++ port,
+    check it transition by transition against the official engine, and build a paired-seed
+    evaluator that counts win/loss flips against a league (this project's heuristic agents
+    plus public ones).
+    <br><i>Gate:</i> identical final money on 100+ seeds; thousands of games per minute.</div>
+  <div class="parrow">↓</div>
+  <div class="pstep"><b>4. Behavior cloning.</b> Train a small Transformer on public replays of
+    top teams, labelled with what the engine actually executed rather than what was
+    ordered (4th place's key trick). Add the two rules every top team kept: sell the
+    overflow before day end, sell everything on the last step.
+    <br><i>Gate:</i> beats this project's final heuristic agent on paired seeds.</div>
+  <div class="parrow">↓</div>
+  <div class="pstep"><b>5. PPO on top of BC.</b> Start with the 6th-place split: keep the BC
+    opening and train PPO only from day 12 on, with a win/loss reward, per-decision clipping,
+    a separate critic, and a KL penalty towards the BC policy. Then widen the window and add
+    self-play against a league.
+    <br><i>Gate:</i> beats the BC policy it started from, over 1,000+ paired games, z &gt; 2.</div>
+  <div class="parrow">↓</div>
+  <div class="pstep"><b>6. Score it.</b> Submit as a late submission and compare against the
+    final leaderboard, and write up what transferred and what didn't.</div>
+</div>
+<p>Stages 1–2 need only a laptop CPU. Stages 4–5 fit on a single consumer GPU at
+small scale: 4th and 7th place trained their final models on one card.</p>
 
 <h2 id="log">Development log</h2>
 <p>The full dated development log (every increment, gate result, bug and rejected idea) is
