@@ -7,6 +7,9 @@ on a market shared with the opponent, over a 720-turn season.
 Built for Kaggle's [Kaggriculture](https://www.kaggle.com/competitions/kaggriculture)
 featured simulation competition (2026), closed 2026-09-30.
 
+**Status: closed (last development 2026-09-03).** The roadmap in
+`PROGRESS.md` is kept as it stood at close.
+
 **Project site with the full write-up, charts and the "what worked / what
 didn't" analysis:** https://alherma7.github.io/AI-agent-Kaggriculture/
 

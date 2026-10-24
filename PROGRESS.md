@@ -845,7 +845,12 @@ real state of `src/` and `agent/main.py`.
   tried, lessons, comparison table) in `docs/index.html`. The roadmap
   below is left as it stood on Sep 3, unchecked items included.
 
-## Next steps
+## Open at close
+
+The project is closed. Unchecked items below were never built. The
+retrospective's "What we never tried" and "Future: an RL version"
+sections (https://alherma7.github.io/AI-agent-Kaggriculture/) replace
+this roadmap for any follow-up.
 
 Roadmap in increasing agent complexity — each level only starts once the
 previous one has cleared `evaluate.py`'s gate and been logged here.
