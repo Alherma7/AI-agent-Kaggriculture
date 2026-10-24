@@ -2,7 +2,45 @@
 
 ![chain-hand pasture agent, day 30/30 leaderboard replay — win, 71106 final money](kaggriculture_agent_v7.png)
 
-Heuristic agent for the Kaggriculture Kaggle simulation competition, built up incrementally: a single-tile wheat loop, then farmer movement over a growing closed tile loop (12 tiles), then hired farm hands each tending their own zone (`wheat_loop_hands_agent`). See [`PROGRESS.md`](PROGRESS.md) for the full development log and [`RESOURCES.md`](RESOURCES.md) for sources.
+Heuristic agent for Kaggle's [Kaggriculture](https://www.kaggle.com/competitions/kaggriculture) simulation competition (2026), closed 2026-09-30.
+
+**Project site with the full retrospective: results, what worked and what didn't, what we never tried, lessons, and a comparison with the top finishers:** https://alherma7.github.io/AI-agent-Kaggriculture/ (source: [`docs/index.html`](docs/index.html))
+
+| | |
+|---|---|
+| **Final leaderboard** | **rank #6448** of 10,148 teams, score **3155.0** (1st: 5890.3), 13 submissions |
+| Active period | 2026-08-05 → 2026-09-03 (stopped 4 weeks before the close) |
+| Final agent | Rule-based: melon → wheat calendar, farmer + up to 9 hands on fixed zones, NE land, cow/sheep on chain hands with bulk wheat pickup; 111,603 mean money on the local 8-seed benchmark |
+
+## What worked and what didn't
+
+The three largest effects were game mechanics the agent was getting wrong, not
+strategy: picking up wheat one unit per shed trip instead of one per pasture
+(+47k mean money), putting SELL orders behind buys in the market list (+7k: the
+engine processes both players' orders in lockstep by index), and a stale
+`if/elif` chain hiring one hand per turn (+7k). All were silent no-ops or price
+effects, found only by instrumenting episodes turn by turn.
+
+The gap to the top was a paradigm gap. Every top-7 team trained a Transformer on
+public replays of the strongest players (behavior cloning, some with self-play
+PPO on top), evaluated by win/loss on paired seeds against a league of opponents,
+and kept only a handful of rules. We hand-coded what we read in those same
+replays and measured against our own previous agent.
+
+## Repository layout
+
+```
+src/              graduated strategies (strategies/baseline.py) + evaluate.py harness
+agent/main.py     generated submission file (never hand-edited)
+scripts/          build_agent.py (AST extractor -> agent/main.py), replay_guard.py
+notebooks/        01-15, the full experimental record, one increment per notebook
+tests/            pytest unit tests for strategies and the build script
+docs/index.html   project site: retrospective
+PROGRESS.md       full dated development log (every increment, gate, bug, rejected idea)
+RESOURCES.md      engine-mechanics notes and sources
+```
+
+The competition's own rules follow below, kept for reference.
 
 ---
 

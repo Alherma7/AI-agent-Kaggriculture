@@ -832,6 +832,19 @@ real state of `src/` and `agent/main.py`.
   switched); `test_agent_dir_matches_generated_output` passes. **Not yet
   submitted to Kaggle.**
 
+- 2026-10-24 — **Post-competition retrospective.** Competition closed
+  2026-09-30; final leaderboard **rank #6448 of 10,148 teams, score
+  3155.0** (1st: 5890.3), last submission 2026-09-03 (chain-hand build,
+  621.4 public at submit time). Development stopped on Sep 3 from a
+  mix of lack of time and the heuristic ceiling becoming visible. Reviewed
+  the published top-10 write-ups (3rd DSM, 4th Farmcore, 5th, 6th, 7th
+  DECEM, plus 1st place's preview): every top-7 team used a Transformer
+  trained by behavior cloning on public replays, several with self-play PPO
+  on top, evaluated by win/loss on paired seeds against a league of
+  opponents. Full retrospective (what worked, what didn't, what we never
+  tried, lessons, comparison table) in `docs/index.html`. The roadmap
+  below is left as it stood on Sep 3, unchecked items included.
+
 ## Next steps
 
 Roadmap in increasing agent complexity — each level only starts once the
