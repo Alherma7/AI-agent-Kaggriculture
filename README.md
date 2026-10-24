@@ -104,23 +104,6 @@ PROGRESS.md       full dated development log (every increment, gate, bug, reject
 RESOURCES.md      engine-mechanics notes and every source consulted
 ```
 
-## Reproduce
-
-1. Create the conda environment from `environment.yml` (Python 3.11,
-   `kaggle-environments`), then `conda activate kaggriculture`.
-2. Run `pytest`. The build script and the graduated strategies are under test.
-3. Run `notebooks/01` through `15` in order to reproduce the experimental
-   record, from environment exploration to the final chain-hand agent.
-4. Run `python scripts/build_agent.py` to regenerate `agent/main.py`, then
-   play it locally:
-
-   ```python
-   from kaggle_environments import make
-   env = make("kaggriculture")
-   env.run(["agent/main.py", "starter"])
-   print([s.reward for s in env.steps[-1]])
-   ```
-
 ## Data and rules
 
 This repository contains code, notebooks and aggregate results only. Replay

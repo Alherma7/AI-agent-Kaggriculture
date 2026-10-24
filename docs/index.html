@@ -172,7 +172,6 @@ Source: <a href="https://github.com/Alherma7/AI-agent-Kaggriculture">github.com/
   <a href="#untried">What we never tried</a>
   <a href="#lessons">Lessons</a>
   <a href="#top">Vs. the top finishers</a>
-  <a href="#reproduce">Reproduce</a>
 </nav>
 
 <h2 id="problem">The problem</h2>
@@ -483,17 +482,7 @@ and the 2nd-place team had not published full write-ups at the time of writing.<
 <a href="https://github.com/definitelynotrussellkirk-bit/kaggriculture-sft">5th</a> ·
 <a href="https://github.com/Decem-Y/kaggriculture-bc">7th</a>.</p>
 
-<h2 id="reproduce">Reproduce</h2>
-<pre>conda env create -f environment.yml
-conda activate kaggriculture
-# tooling and graduated strategies are under test
-pytest
-# notebooks/01 .. 15 reproduce the record in order, from env
-# exploration to the final chain-hand agent (notebook 15)
-# regenerate the flat submission file from the active strategy
-python scripts/build_agent.py
-# play it locally
-python -c "from kaggle_environments import make; env = make('kaggriculture'); env.run(['agent/main.py', 'starter']); print([s.reward for s in env.steps[-1]])"</pre>
+<h2 id="log">Development log</h2>
 <p>The full dated development log (every increment, gate result, bug and rejected idea) is
 in <a href="https://github.com/Alherma7/AI-agent-Kaggriculture/blob/master/PROGRESS.md">PROGRESS.md</a>.
 Engine-mechanics notes and sources are in
